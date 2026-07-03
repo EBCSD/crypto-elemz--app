@@ -6,24 +6,13 @@ from tradingview_screener import Query, col
 # Mobilbarát, modern UI konfiguráció
 st.set_page_config(page_title="ICT Crypto Bot", layout="wide", initial_sidebar_state="collapsed")
 
-st.markdown("""
-    <style>
-    .main { background-color: #0d1117; color: #c9d1d9; }
-    div[data-testid="metric-container"] {
-        background-color: #161b22;
-        border: 1px solid #30363d;
-        padding: 12px;
-        border-radius: 10px;
-    }
-    h1, h2, h3 { color: #58a6ff !important; }
-    </style>
-""", unsafe_allow_code=True)
+# Biztonságos, javított CSS stílusok
+st.markdown("<style>.main { background-color: #0d1117; color: #c9d1d9; } h1, h2, h3 { color: #58a6ff !important; }</style>", unsafe_allow_code=True)
 
 st.title("🏹 ICT Liquidity & Leverage Assistant")
 
 # Oldalsáv a beállításoknak
 st.sidebar.header("⚙️ Beállítások")
-# Hozzáadva a BITGET a tőzsdelistához
 exchange = st.sidebar.selectbox("Tőzsde:", ["BITGET", "BINANCE", "BYBIT", "OKX"])
 market_type = st.sidebar.radio("Piac:", ["Futures", "Spot"])
 
@@ -46,7 +35,6 @@ def get_crypto_data(exch):
 try:
     df = get_crypto_data(exchange)
     
-    # Bitget és más tőzsdék Futures/Spot szűrése (PERP, USDT, SUSDT párok kezelése)
     if market_type == "Futures":
         df = df[df['name'].str.contains('PERP|USDT|USD!', case=False, na=False)]
     else:
@@ -56,7 +44,7 @@ try:
     selected_pair = st.selectbox("🎯 Válassz kriptopárt elemzésre:", pairs if pairs else ["Nincs elérhető adat"])
 
     if selected_pair and pairs:
-        coin = df[df['name'] == selected_pair].iloc
+        coin = df[df['name'] == selected_pair].iloc[0]
         
         price = float(coin['close'])
         ltf_high, ltf_low = float(coin['high']), float(coin['low'])
@@ -64,7 +52,7 @@ try:
         atr = float(coin['ATR']) if pd.notna(coin['ATR']) else (price * 0.01)
         ema20 = float(coin['EMA20']) if pd.notna(coin['EMA20']) else price
         
-        # Stratégia ellenőrzése (ICT Liquidity Sweep + Inverse FVG / EMA20 gyertyazárás megerősítés)
+        # Stratégia ellenőrzése
         trade_signal = "VÁRAKOZÁS"
         if ltf_low <= htf_low and price > ema20:
             trade_signal = "LONG / BUY"
@@ -77,7 +65,7 @@ try:
             sl = htf_high + (0.2 * atr)
             tp = htf_low
 
-        # Kártyák megjelenítése a telefon képernyőjén
+        # Kártyák megjelenítése
         c1, c2, c3 = st.columns(3)
         c1.metric("Aktuális Ár", f"${price:,.4f}")
         c2.metric("Jelzés", trade_signal)
@@ -86,33 +74,36 @@ try:
         if trade_signal != "VÁRAKOZÁS":
             st.markdown("### ⚡ Számított Pozíció és Optimális Áttétel")
             
-            # KOCKÁZAT SZÁMÍTÁS (A tőke védelmében)
             sl_distance_percent = abs(entry - sl) / entry
             max_loss_usd = total_balance * (risk_percent / 100)
-            
-            # Pozíció méret dollárban áttétel nélkül
             position_size_usd = max_loss_usd / sl_distance_percent
             
-            # JAVASOLT ÁTTÉTEL (A likvidáció elkerülésére a Stop Loss előtt)
             recommended_leverage = int(0.8 / sl_distance_percent)
-            recommended_leverage = max(1, min(recommended_leverage, 50)) # Korlátozás maximum 50x áttételig
-            
-            # Ténylegesen zárolt fedezet (Margin) a tőzsdén
+            recommended_leverage = max(1, min(recommended_leverage, 50))
             required_margin = position_size_usd / recommended_leverage
 
             cc1, cc2, cc3 = st.columns(3)
             with cc1:
                 st.success(f"**Belépő:** ${entry:,.4f}\n\n**Stop Loss:** ${sl:,.4f}\n\n**Take Profit:** ${tp:,.4f}")
             with cc2:
-                st.warning(f"**Javasolt Tőkeáttétel:** {recommended_leverage}x\n\n*(Ez biztosítja a maximális profitot a számla veszélyeztetése nélkül)*")
+                st.warning(f"**Javasolt Tőkeáttétel:** {recommended_leverage}x\n\n*(Biztonságos méretezés)*")
             with cc3:
                 st.info(f"**Tőzsdén megnyitandó méret:** ${position_size_usd:,.2f}\n\n**Szükséges tőke (Margin):** ${required_margin:,.2f}")
                 
-            # Megtérülési mutató (RRR)
             rrr = abs(tp - entry) / abs(entry - sl) if abs(entry - sl) > 0 else 0
             st.metric("Kockázat/Nyereség arány (RRR)", f"1 : {rrr:.2f}")
+            
+            # Javított grafikon rajzolás
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=[0, 1, 2], y=[entry, entry, entry], name="Belépő", line=dict(color='cyan', width=2)))
+            fig.add_trace(go.Scatter(x=[0, 1, 2], y=[sl, sl, sl], name="Stop Loss", line=dict(color='red', dash='dash')))
+            fig.add_trace(go.Scatter(x=[0, 1, 2], y=[tp, tp, tp], name="Take Profit", line=dict(color='green', width=2)))
+            fig.update_layout(title="Pozíciós Szintek", template="plotly_dark", height=250)
+            st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info("⏳ Jelenleg nincs aktív intézményi sweep a kiválasztott Bitget páron. Várunk a likviditás kiszedésére.")
+            st.info("⏳ Jelenleg nincs aktív intézményi sweep a páron. Várunk a likviditás kiszedésére.")
 
 except Exception as e:
     st.error(f"Adatlekérési hiba történt: {e}")
+    
+            
