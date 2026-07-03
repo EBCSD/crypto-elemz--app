@@ -1,13 +1,10 @@
-import streamlit as st
+       import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from tradingview_screener import Query, col
 
-# Mobilbarát, modern UI konfiguráció
+# Mobilbarát, gyári stabil konfiguráció
 st.set_page_config(page_title="ICT Crypto Bot", layout="wide", initial_sidebar_state="collapsed")
-
-# Biztonságos, javított CSS stílusok
-st.markdown("<style>.main { background-color: #0d1117; color: #c9d1d9; } h1, h2, h3 { color: #58a6ff !important; }</style>", unsafe_allow_code=True)
 
 st.title("🏹 ICT Liquidity & Leverage Assistant")
 
@@ -44,7 +41,7 @@ try:
     selected_pair = st.selectbox("🎯 Válassz kriptopárt elemzésre:", pairs if pairs else ["Nincs elérhető adat"])
 
     if selected_pair and pairs:
-        coin = df[df['name'] == selected_pair].iloc[0]
+        coin = df[df['name'] == selected_pair].iloc
         
         price = float(coin['close'])
         ltf_high, ltf_low = float(coin['high']), float(coin['low'])
@@ -63,7 +60,7 @@ try:
             trade_signal = "SHORT / SELL"
             entry = price
             sl = htf_high + (0.2 * atr)
-            tp = htf_low
+            tp = ltf_low
 
         # Kártyák megjelenítése
         c1, c2, c3 = st.columns(3)
@@ -93,11 +90,10 @@ try:
             rrr = abs(tp - entry) / abs(entry - sl) if abs(entry - sl) > 0 else 0
             st.metric("Kockázat/Nyereség arány (RRR)", f"1 : {rrr:.2f}")
             
-            # Javított grafikon rajzolás
             fig = go.Figure()
-            fig.add_trace(go.Scatter(x=[0, 1, 2], y=[entry, entry, entry], name="Belépő", line=dict(color='cyan', width=2)))
-            fig.add_trace(go.Scatter(x=[0, 1, 2], y=[sl, sl, sl], name="Stop Loss", line=dict(color='red', dash='dash')))
-            fig.add_trace(go.Scatter(x=[0, 1, 2], y=[tp, tp, tp], name="Take Profit", line=dict(color='green', width=2)))
+            fig.add_trace(go.Scatter(x=[1, 2, 3], y=[entry, entry, entry], name="Belépő", line=dict(color='cyan', width=2)))
+            fig.add_trace(go.Scatter(x=[1, 2, 3], y=[sl, sl, sl], name="Stop Loss", line=dict(color='red', dash='dash')))
+            fig.add_trace(go.Scatter(x=[1, 2, 3], y=[tp, tp, tp], name="Take Profit", line=dict(color='green', width=2)))
             fig.update_layout(title="Pozíciós Szintek", template="plotly_dark", height=250)
             st.plotly_chart(fig, use_container_width=True)
         else:
@@ -105,5 +101,4 @@ try:
 
 except Exception as e:
     st.error(f"Adatlekérési hiba történt: {e}")
-    
-            
+     
