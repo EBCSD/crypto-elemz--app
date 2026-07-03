@@ -1,4 +1,5 @@
-   import streamlit as st
+ # Kesz_Alkalmazas
+import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from tradingview_screener import Query, col
@@ -53,7 +54,7 @@ try:
             trade_signal = "SHORT / SELL"
             entry = price
             sl = htf_high + (0.2 * atr)
-            tp = htf_low
+            tp = ltf_low
 
         c1, c2, c3 = st.columns(3)
         c1.metric("Aktuális Ár", f"${price:,.4f}")
@@ -80,9 +81,4 @@ try:
             st.info("⏳ Nincs aktív sweep. Várunk a likviditás kiszedésére.")
 except Exception as e:
     st.error(f"Hiba: {e}")
- 
-    
-        
-            
-            
-     
+  
