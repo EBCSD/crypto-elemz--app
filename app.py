@@ -4,7 +4,7 @@ import ccxt
 import plotly.graph_objects as go
 import time
 
-# 1. ALAPBEÁLLÍTÁSOK (Dizájn és stílusblokk teljesen törölve a hibák elkerülésére)
+# 1. ALAPBEÁLLÍTÁSOK
 st.set_page_config(page_title="ALGO ICT PRO", layout="wide", initial_sidebar_state="collapsed")
 
 st.title("⚡ ALGO ICT PRO V2")
@@ -200,13 +200,14 @@ def render_signal_block(display_name, res, unique_id):
     st.write(f"📊 **R:R ARÁNY / AKTUÁLIS ÁR:** 1:{res['rr']} | ${res['current_price']:.5f}")
     st.markdown("---")
 
-# --- FŐ VEZÉRLŐ LOGIKA ---
-if not run_scanner:
-    st.subheader("🎯 Kézi Elemzés és Egyedi Keresés")
-    lumia_index = filtered_symbols.index("LUMIA/USDT") if "LUMIA/USDT" in filtered_symbols else 0
-    selected_pair = st.selectbox("Válassz ki egy konkrét párt az azonnali elemzéshez:", filtered_symbols, index=lumia_index)
-    
-    manual_res = analyze_pair(selected_pair)
-    if manual_res:
-        render_signal_block(selected_pair, manual_res, "manual_mode")
-    else:
+# --- 5. JAVÍTOTT, LINEÁRIS FŐ VEZÉRLŐ LOGIKA (NINCS TÖBBÉ BEKEZDÉS HIBA) ---
+if run_scanner:
+    st.subheader("🕵️‍♂️ ALGO ICT PRO Élő Automata Piacszkenner")
+    active_signals = []
+    scan_placeholder = st.empty()
+
+    for idx, pair in enumerate(filtered_symbols):
+        display_name = str(pair).split(':') if ':' in str(pair) else str(pair)
+        scan_placeholder.text(f"Teljes Piac Átvizsgálása ({idx+1}/{len(filtered_symbols)}): {display_name}")
+        res = analyze_pair(pair)
+        if res and "VÁRAKOZÁS" not in res["trade_signal"]:
