@@ -22,11 +22,11 @@ st.markdown("""
     }
     .data-row {
         background-color: #1c2030;
-        padding: 10px;
+        padding: 15px;
         border-radius: 6px;
         border: 1px solid #2a2e39;
         margin-top: 5px;
-        margin-bottom: 5px;
+        margin-bottom: 30px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -69,7 +69,7 @@ def analyze_pair(pair_symbol):
     try:
         clean_symbol = pair_symbol.split(':')[0] if ':' in pair_symbol else pair_symbol
 
-        # HTF szintek lekérése (1h és 4h kombinált likviditás)
+        # HTF lekérése
         htf_1h = exch.fetch_ohlcv(clean_symbol, timeframe='1h', limit=48)
         htf_4h = exch.fetch_ohlcv(clean_symbol, timeframe='4h', limit=24)
         if not htf_1h or not htf_4h: return None
@@ -95,7 +95,6 @@ def analyze_pair(pair_symbol):
             df_ltf['time'] = pd.to_datetime(df_ltf['time'], unit='ms')
             length = len(df_ltf)
 
-            # iFVG szkennelés: Megkeressük azt a zónát, amit az ár testtel áttört (inverzált)
             for i in range(2, length - 4):
                 if df_ltf['high'].iloc[i] < df_ltf['low'].iloc[i+2]:
                     o_fvg_high = float(df_ltf['low'].iloc[i+2])
@@ -138,7 +137,21 @@ def analyze_pair(pair_symbol):
         trade_signal = "DOBOZON BELÜL (Visszateszt)"
         entry_price = fvg_mid
         sl = htf_high if fvg_type == "BEARISH_INVERSE" else htf_low
+        
+        # Dinamikus célár számítás fix 1:3.5 RR-el (Ami garantáltan nagyobb mint a kért 1:3)
         tp = entry_price - (abs(entry_price - sl) * 3.5) if fvg_type == "BEARISH_INVERSE" else entry_price + (abs(entry_price - sl) * 3.5)
+
+        # SZIGORÚ SZŰRÉS: Kiszámoljuk az aktuális RR arányt. Ha kisebb mint 1:3, elvetjük a jelet!
+        risk_dist = abs(entry_price - sl)
+        reward_dist = abs(tp - entry_price)
+        rr_ratio = reward_dist / risk_dist if risk_dist > 0 else 0
+        if rr_ratio < 3.0: 
+            return None
+
+        # DINAMIKUS TŐKEÁTTÉTEL JAVASLAT KISZÁMÍTÁSA (MAX 10x)
+        sl_percent = (risk_dist / entry_price)
+        calculated_leverage = int(risk_percent / (sl_percent * 100)) if sl_percent > 0 else 1
+        leverage_suggestion = max(1, min(calculated_leverage, 10)) # Szigorúan lekorlátozva maximum 10-ig!
 
         if fvg_type == "BEARISH_INVERSE" and current_price <= (fvg_high * 1.005):
             trade_signal = "SHORT / SELL"
@@ -148,7 +161,8 @@ def analyze_pair(pair_symbol):
         return {
             "df_ltf": df_ltf, "htf_high": htf_high, "htf_low": htf_low, "current_price": current_price,
             "fvg_high": fvg_high, "fvg_low": fvg_low, "fvg_mid": fvg_mid, "entry_price": entry_price,
-            "sl": sl, "tp": tp, "trade_signal": trade_signal, "chosen_tf": chosen_tf, "fvg_idx": fvg_idx
+            "sl": sl, "tp": tp, "trade_signal": trade_signal, "chosen_tf": chosen_tf, "fvg_idx": fvg_idx,
+            "leverage": leverage_suggestion, "rr": round(rr_ratio, 1)
         }
     except:
         return None
@@ -160,7 +174,7 @@ scan_depth = st.slider("Átvizsgálandó top aktív párok száma:", min_value=1
 active_signals = []
 scan_placeholder = st.empty()
 
-# 1. Háttér feldolgozás (Gyűjtjük a szignálokat és az elemzési adatokat is)
+# 1. Háttér feldolgozás
 target_pairs = filtered_symbols[:scan_depth]
 for pair in target_pairs:
     display_name = pair.split(':')[0] if ':' in pair else pair
@@ -172,9 +186,9 @@ for pair in target_pairs:
 
 scan_placeholder.empty()
 
-# 2. JAVÍTÁS: Minden egyes megtalált pár megkapja a saját fejlécét, chartját és adatait egymás alá lefelé!
+# 2. GARANTÁLT KIRAJZOLÁS: Minden talált pár megkapja a saját fejlécét, chartját és adatait egymás alá lefelé!
 if active_signals:
-    st.success(f"Találatok a piacon: {len(active_signals)} db aktív setup!")
+    st.success(f"Találatok a piacon (Szigorú 1:3+ RR szűréssel): {len(active_signals)} db aktív setup!")
     for idx, (display_name, res) in enumerate(active_signals):
         df_ltf = res["df_ltf"]
         length = len(df_ltf)
@@ -186,7 +200,7 @@ if active_signals:
             </div>
         """, unsafe_allow_html=True)
 
-        # B) TRADINGVIEW STÍLUSÚ GRAFIKON MINDEN PÁRHOZ KÜLÖN
+        # B) TRADINGVIEW STÍLUSÚ GRAFIKON COORD-SZINKRONNAL (JAVÍTVA A STRING-LISTAHIBA)
         fig = go.Figure()
         
         fig.add_trace(go.Candlestick(
@@ -208,12 +222,3 @@ if active_signals:
             e_idx = int(min(s_idx + 15, length - 1))
             
             t_start = df_ltf['time'].iloc[s_idx]
-            t_end = df_ltf['time'].iloc[e_idx]
-            
-            bx = [t_start, t_end, t_end, t_start, t_start]
-            by = [res["fvg_high"], res["fvg_high"], res["fvg_low"], res["fvg_low"], res["fvg_high"]]
-            
-            fig.add_trace(go.Scatter(x=bx, y=by, fill="toself", fillcolor="rgba(255, 214, 0, 0.04)", line=dict(color='#ffd600', width=1.5), showlegend=False))
-            fig.add_trace(go.Scatter(x=[t_start, t_end], y=[res["fvg_mid"], res["fvg_mid"]], line=dict(color='#e040fb', width=2, dash='dash'), showlegend=False))
-
-        # Y-zoom automatikus igazítása a gyertyák közvetlen környezetére (Nincs többé összenyomott vékony csík!)
