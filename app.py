@@ -1,4 +1,4 @@
-# Kesz_Alkalmazas_Vegleges_Es_Mukoedo
+# Kesz_Alkalmazas_Vegleges_Hibatlan
 import streamlit as st
 import pandas as pd
 import ccxt
@@ -150,7 +150,7 @@ def analyze_pair(pair_symbol):
     except:
         return None
 
-# --- FOLYAMATOS ELEMZŐ MEGJELENÍTŐ RENDSZER ---
+# --- ELEMZŐ MEGJELENÍTŐ RENDSZER ---
 st.subheader("🕵️‍♂️ Élő Kétirányú Piacszkenner (Grafikonos Lista)")
 scan_depth = st.slider("Átvizsgálandó top aktív párok száma:", min_value=10, max_value=100, value=30, step=10)
 
@@ -172,6 +172,7 @@ if st.button("🔄 Piac Pásztázása és Találatok Azonnali Kirajzolása", use
         if res and "VÁRAKOZÁS" not in res["trade_signal"]:
             found_any = True
             df_ltf = res["df_ltf"]
+            length = len(df_ltf)
             
             with live_container:
                 # 1. Fejléc kártya sötét témával
@@ -181,7 +182,7 @@ if st.button("🔄 Piac Pásztázása és Találatok Azonnali Kirajzolása", use
                     </div>
                 """, unsafe_allow_html=True)
                 
-                # 2. TradingView stílusú grafikon felépítése
+                # 2. TradingView stílusú grafikon felépítése (TŰPONTOSAN JAVÍTOTT ZÁRÓJELEKKEL)
                 fig = go.Figure()
                 
                 fig.add_trace(go.Candlestick(
@@ -190,23 +191,25 @@ if st.button("🔄 Piac Pásztázása és Találatok Azonnali Kirajzolása", use
                     increasing_fillcolor='#089981', decreasing_fillcolor='#f23645', name="Ár"
                 ))
                 
-                fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["htf_high"]]*len(df_ltf), name="HTF Liq High", line=dict(color='#26a69a', width=1.5)))
-                fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["htf_low"]]*len(df_ltf), name="HTF Liq Low", line=dict(color='#ef5350', width=1.5)))
+                fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["htf_high"]]*length, name="HTF Liq High", line=dict(color='#26a69a', width=1.5)))
+                fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["htf_low"]]*length, name="HTF Liq Low", line=dict(color='#ef5350', width=1.5)))
 
-                # JAVÍTÁS: A szögletes zárójelek hajszálpontosan lezárva (.iloc[s_idx] és .iloc[e_idx])
+                # FVG téglalap és lila szaggatott vonal rajzolása szigorúan lezárt szögletes és kerek zárójelekkel
                 if res["fvg_high"] > 0 and res["fvg_start_idx"] is not None:
-                    s_idx = res["fvg_start_idx"]
-                    e_idx = min(s_idx + 10, len(df_ltf) - 1)
+                    s_idx = int(res["fvg_start_idx"])
+                    e_idx = int(min(s_idx + 10, length - 1))
                     
-                    bx = [df_ltf['time'].iloc[s_idx], df_ltf['time'].iloc[e_idx], df_ltf['time'].iloc[e_idx], df_ltf['time'].iloc[s_idx], df_ltf['time'].iloc[s_idx]]
+                    t_start = df_ltf['time'].iloc[s_idx]
+                    t_end = df_ltf['time'].iloc[e_idx]
+                    
+                    bx = [t_start, t_end, t_end, t_start, t_start]
                     by = [res["fvg_high"], res["fvg_high"], res["fvg_low"], res["fvg_low"], res["fvg_high"]]
                     
                     fig.add_trace(go.Scatter(x=bx, y=by, fill="toself", fillcolor="rgba(255, 214, 0, 0.05)", line=dict(color='#ffd600', width=1.5), showlegend=False))
-                    fig.add_trace(go.Scatter(x=[df_ltf['time'].iloc[s_idx], df_ltf['time'].iloc[e_idx]], y=[res["fvg_mid"], res["fvg_mid"]], line=dict(color='#e040fb', width=1.5, dash='dash'), name="CE 50%"))
+                    fig.add_trace(go.Scatter(x=[t_start, t_end], y=[res["fvg_mid"], res["fvg_mid"]], line=dict(color='#e040fb', width=1.5, dash='dash'), name="CE 50%"))
 
-                # Kereskedési szintek
-                fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["entry_price"]]*len(df_ltf), name="Belépő", line=dict(color='#29b6f6', width=2)))
-                fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["sl"]]*len(df_ltf), name="SL", line=dict(color='#ff1744', width=1.5, dash='dash')))
-                fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["tp"]]*len(df_ltf), name="TP", line=dict(color='#00e676', width=1.5)))
+                # Kereskedési szintek stabil kirajzolása
+                fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["entry_price"]]*length, name="Belépő", line=dict(color='#29b6f6', width=2)))
+                fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["sl"]]*length, name="SL", line=dict(color='#ff1744', width=1.5, dash='dash')))
+                fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["tp"]]*length, name="TP", line=dict(color='#00e676', width=1.5)))
 
-                fig.update_layout(
