@@ -1,4 +1,4 @@
-# Kesz_Alkalmazas_Vegleges_Hibatlan_Lista
+# Kesz_Alkalmazas_Vegleges_Javitott
 import streamlit as st
 import pandas as pd
 import ccxt
@@ -7,7 +7,7 @@ import time
 
 st.set_page_config(page_title="ALGO ICT PRO", layout="wide", initial_sidebar_state="collapsed")
 
-# Szigorú TradingView Dark Mobil téma és kártya stílusok beállítása (Nincs fehér felület)
+# Szigorú TradingView Dark Mobil téma és kártya stílusok beállítása
 st.markdown("""
     <style>
     .block-container { padding-top: 1rem; padding-bottom: 1rem; background-color: #131722; }
@@ -98,8 +98,6 @@ def analyze_pair(pair_symbol):
             for i in range(len(df_ltf) - 4, 2, -1):
                 if df_ltf['low'].iloc[i] > df_ltf['high'].iloc[i+2]: # Bearish FVG
                     fvg_high = float(df_ltf['low'].iloc[i])
-                    fvg_low = float(df_htf['high'].iloc[i+2] if i+2 < len(df_htf) else df_ltf['high'].iloc[i+2])
-                    fvg_high = float(df_ltf['low'].iloc[i])
                     fvg_low = float(df_ltf['high'].iloc[i+2])
                     fvg_index_start = i
                     fvg_type = "BEARISH"
@@ -170,7 +168,7 @@ if run_scanner:
 
     scan_placeholder.empty()
 
-    # Kirajzolási fázis egymás alá szigorúan lezárt HTML-el
+    # Kirajzolási fázis egymás alá
     if active_signals:
         for idx, (pair, res) in enumerate(active_signals):
             df_ltf = res["df_ltf"]
@@ -220,3 +218,6 @@ if run_scanner:
                 template="plotly_dark", xaxis_rangeslider_visible=False, height=400,
                 paper_bgcolor='#131722', plot_bgcolor='#131722', margin=dict(l=10, r=55, t=10, b=10),
                 showlegend=False,
+                yaxis=dict(side="right", range=[y_min, y_max], gridcolor="#2a2e39", zeroline=False, tickfont=dict(color="#848e9c", size=10)),
+                xaxis=dict(gridcolor="#2a2e39", zeroline=False, tickfont=dict(color="#848e9c", size=10))
+            )
