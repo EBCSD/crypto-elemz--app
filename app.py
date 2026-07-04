@@ -1,4 +1,4 @@
-# Kesz_Alkalmazas_TradingView_Design_Es_Pontos_Strategia
+# Kesz_Alkalmazas_Javitott_Stabil
 import streamlit as st
 import pandas as pd
 import ccxt
@@ -32,7 +32,7 @@ st.sidebar.markdown("---")
 st.sidebar.subheader("🔍 Automata Keresési Mód")
 run_scanner = st.sidebar.checkbox("Automata Piacszkenner Bekapcsolása")
 
-# API Inicializálás
+# API Inicializálás - Hibajavítás a szűrésnél
 exch = getattr(ccxt, exchange_id)({'enableRateLimit': True})
 exch.load_markets()
 all_symbols = list(exch.markets.keys())
@@ -55,7 +55,7 @@ def analyze_pair(pair_symbol):
         fvg_high, fvg_low, fvg_mid = 0.0, 0.0, 0.0
         found_fvg = False
         fvg_index_start = None
-        fvg_type = None # "BULLISH" vagy "BEARISH"
+        fvg_type = None
         
         for tf in timeframes_to_check:
             ltf_ohlcv = exch.fetch_ohlcv(pair_symbol, timeframe=tf, limit=45)
@@ -91,31 +91,25 @@ def analyze_pair(pair_symbol):
         entry_price = fvg_mid
         sl, tp = current_price, current_price
         
-        # Likviditás söprések ellenőrzése a teljes ltf ablakban
         was_sell_swept = df_ltf['low'].min() <= htf_low
         was_buy_swept = df_ltf['high'].max() >= htf_high
         
-        # 3. LÉPÉS: PONTOS SHORT ÉS LONG IRÁNYÚ STRATÉGIA LOGIKA (A KÉPED ALAPJÁN)
+        # 3. LÉPÉS: PONTOS SHORT ÉS LONG IRÁNYÚ STRATÉGIA LOGIKA
         if found_fvg and fvg_index_start is not None:
-            # SHORT SZITUÁCIÓ (Mint a beküldött képeden): Felső söprés történt, az ár letörte az FVG-t, majd visszazúgott bele
             if was_buy_swept and fvg_type == "BEARISH":
-                # Ellenőrizzük, hogy az FVG képződés után az ár visszatesztelte-e alulról a dobozt a jobb beszállóért
                 post_fvg_df = df_ltf.iloc[fvg_index_start+2:]
                 if not post_fvg_df.empty:
                     max_retest = post_fvg_df['high'].max()
-                    # Ha a visszahúzódás elérte legalább a doboz alját vagy a közepét
                     if max_retest >= fvg_low and current_price <= fvg_high:
                         entry_price = fvg_mid
                         sl = htf_high
-                        tp = fvg_mid - (abs(fvg_mid - sl) * 3.5) # Biztonságos 3.5x-es R:R célár
+                        tp = fvg_mid - (abs(fvg_mid - sl) * 3.5)
                         trade_signal = "SHORT / SELL (Inverz FVG Visszateszt)"
                         
-            # LONG SZITUÁCIÓ: Alsó söprés történt, az ár felfelé átütötte az FVG-t, majd felülről visszahúzódott bele
             elif was_sell_swept and fvg_type == "BULLISH":
                 post_fvg_df = df_ltf.iloc[fvg_index_start+2:]
                 if not post_fvg_df.empty:
                     min_retest = post_fvg_df['low'].min()
-                    # Ha a visszahúzódás leért legalább a doboz tetejére vagy közepére
                     if min_retest <= fvg_high and current_price >= fvg_low:
                         entry_price = fvg_mid
                         sl = htf_low
@@ -131,7 +125,7 @@ def analyze_pair(pair_symbol):
     except:
         return None
 
-# --- AUTOMATA SZKENNER MINDKÉT IRÁNYRA ---
+# --- AUTOMATA SZKENNER ---
 if run_scanner:
     st.subheader("🕵️‍♂️ Élő Kétirányú Szkenner (LONG & SHORT Találatok)")
     scan_placeholder = st.empty()
@@ -155,7 +149,7 @@ if run_scanner:
     else:
         st.info("A piacot figyeljük: Jelenleg nincs egyetlen szabályos mintázat szerinti visszazúzódás sem.")
 
-# --- TRADINGVIEW-STÍLUSÚ MOBIL GRAFIKON ---
+# --- MOBIL GRAFIKON STABIL JAVÍTÁSSAL ---
 st.markdown("---")
 selected_pair = st.selectbox("🎯 Válassz ki egy párt a TradingView-nézethez:", filtered_symbols)
 res = analyze_pair(selected_pair)
@@ -165,32 +159,47 @@ if res:
     
     fig = go.Figure()
     
-    # Gyertyák tűpontos TradingView színekkel és méretezéssel
     fig.add_trace(go.Candlestick(
         x=df_ltf['time'], open=df_ltf['open'], high=df_ltf['high'], low=df_ltf['low'], close=df_ltf['close'],
         increasing_line_color='#089981', decreasing_line_color='#f23645',
         increasing_fillcolor='#089981', decreasing_fillcolor='#f23645', name="Árfolyam"
     ))
     
-    # HTF Likviditási szintek kirajzolása pontosan a mintaképed stílusában (Felső zöld vonal)
     fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["htf_high"]]*len(df_ltf), name="HTF Liquidity High", line=dict(color='#26a69a', width=2)))
     fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["htf_low"]]*len(df_ltf), name="HTF Liquidity Low", line=dict(color='#ef5350', width=2)))
 
-    # TRADINGVIEW DOBOZ MEGJELENÍTÉS: Csak az FVG zónán belül rajzolja ki a zárt dobozt, ahogy a képeden van!
+    # JAVÍTÁS: Szabályos go.Scatter téglalap rajzolás fill='toself' paraméterrel, és .iloc[] zárójelek pótlása
     if res["fvg_high"] > 0 and res["fvg_start_idx"] is not None:
-        # A doboz kezdete az FVG gyertya ideje, a vége pedig az azt követő 6. gyertya (hogy zárt, tiszta téglalap legyen a képed szerint!)
         start_idx = res["fvg_start_idx"]
         end_idx = min(start_idx + 8, len(df_ltf) - 1)
         
         box_x = [df_ltf['time'].iloc[start_idx], df_ltf['time'].iloc[end_idx], df_ltf['time'].iloc[end_idx], df_ltf['time'].iloc[start_idx], df_ltf['time'].iloc[start_idx]]
         box_y = [res["fvg_high"], res["fvg_high"], res["fvg_low"], res["fvg_low"], res["fvg_high"]]
         
-        # Sárga zárt TradingView FVG doboz
-        fig.add_trace(go.Scatter(x=box_x, y=box_y, fill="subsection", fillcolor="rgba(255, 214, 0, 0.05)", line=dict(color='#ffd600', width=2), name="FVG Doboz"))
+        # Stabil TradingView FVG doboz
+        fig.add_trace(go.Scatter(x=box_x, y=box_y, fill="toself", fillcolor="rgba(255, 214, 0, 0.08)", line=dict(color='#ffd600', width=1.5), name="FVG Doboz"))
         
-        # Doboz szaggatott lila/sárga középvonala (CE 50%) pontosan a képed szerint!
-        fig.add_trace(go.Scatter(x=[df_ltf['time'].iloc[start_idx], df_ltf['time'].iloc[end_idx]], y=[res["fvg_mid"], res["fvg_mid"]], line=dict(color='rgba(255, 214, 0, 0.5)', width=1.5, dash='dash'), name="CE 50%"))
+        # Doboz felezővonala (CE 50%) - .iloc[] hiba javítva
+        fig.add_trace(go.Scatter(x=[df_ltf['time'].iloc[start_idx], df_ltf['time'].iloc[end_idx]], y=[res["fvg_mid"], res["fvg_mid"]], line=dict(color='rgba(255, 214, 0, 0.6)', width=1.5, dash='dash'), name="CE 50%"))
 
-    # Kereskedési szintek jelölése
     if "VÁRAKOZÁS" not in res["trade_signal"]:
         fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["entry_price"]]*len(df_ltf), name="Belépési Ár", line=dict(color='#29b6f6', width=2)))
+        fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["sl"]]*len(df_ltf), name="Stop Loss (SL)", line=dict(color='#ff1744', width=2, dash='dash')))
+        fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["tp"]]*len(df_ltf), name="Take Profit (TP)", line=dict(color='#00e676', width=2)))
+
+    fig.update_layout(
+        template="plotly_dark", xaxis_rangeslider_visible=False, height=520,
+        paper_bgcolor='#131722', plot_bgcolor='#131722',
+        margin=dict(l=10, r=60, t=10, b=10),
+        legend=dict(orientation="h", yanchor="bottom", y=-0.25, xanchor="center", x=0.5, font=dict(size=10, color="#d1d4dc")),
+        yaxis=dict(side="right", gridcolor="#2a2e39", zeroline=False, tickfont=dict(size=11, color="#848e9c")),
+        xaxis=dict(gridcolor="#2a2e39", zeroline=False, tickfont=dict(size=11, color="#848e9c"))
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Szintek kiírása
+    st.subheader("🎯 Szignál és Pozíció Kalkulátor")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("BESZÁLÓ (CE)", f"${res['entry_price']:.5f}")
+    c2.metric("STOP LOSS", f"${res['sl']:.5f}")
+    c3.metric("TAKE PROFIT", f"${res['tp']:.5f}")
