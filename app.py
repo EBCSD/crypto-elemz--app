@@ -17,12 +17,21 @@ scan_all_pairs = st.sidebar.checkbox("Minden pár automata szűrése", value=Fal
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("💰 Kockázatkezelés")
-total_balance = st.sidebar.number_input("Teljes Tőkéd ($):", min_value=10, value=1000)
+total_balance = st.sidebar.number_input("Teljes Kereskedési Tőkéd ($):", min_value=10, value=1000)
 risk_percent = st.sidebar.slider("Kockázat (%):", min_value=0.5, max_value=100.0, value=5.0, step=0.5)
 
 @st.cache_resource
 def init_exchange(exch_id):
     return getattr(ccxt, exch_id)({'enableRateLimit': True})
+
+def calc_atr(df):
+    high_low = df['high'] - df['low']
+    high_close = (df['high'] - df['close'].shift()).abs()
+    low_close = (df['low'] - df['close'].shift()).abs()
+    df['tr'] = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+    df['atr'] = df['tr'].rolling(window=14).mean()
+    val = df['atr'].iloc[-1]
+    return val if pd.notna(val) else (df['close'].iloc[-1] * 0.005)
 
 def analyze_strategy(df_htf, df_ltf):
     htf_high = df_htf['high'].max()
@@ -32,14 +41,7 @@ def analyze_strategy(df_htf, df_ltf):
     
     df_ltf['ema20'] = df_ltf['close'].ewm(span=20, adjust=False).mean()
     current_ema20 = df_ltf['ema20'].iloc[-1]
-    
-    df_ltf['tr'] = pd.concat([
-        df_ltf['high'] - df_ltf['low'], 
-        (df_ltf['high'] - df_ltf['close'].shift()).abs(), 
-        (df_ltf['low'] - df_ltf['close'].shift()).abs()
-    ], axis=1).max(axis=1)
-    df_ltf['atr'] = df_ltf['tr'].rolling(window=14).mean()
-    current_atr = df_ltf['atr'].iloc[-1] if pd.notna(df_ltf['atr'].iloc[-1]) else (current_price * 0.005)
+    current_atr = calc_atr(df_ltf)
     
     was_sell_swept = (df_ltf['low'].min() <= htf_low)
     was_buy_swept = (df_ltf['high'].max() >= htf_high)
@@ -69,6 +71,25 @@ def analyze_strategy(df_htf, df_ltf):
         return "SHORT / SELL", current_price, sl, tp1, tp2, fvg_high, fvg_low, fvg_mid, htf_high, htf_low
         
     return "VÁRAKOZÁS", current_price, 0, 0, 0, fvg_high, fvg_low, fvg_mid, htf_high, htf_low
+
+def show_metrics(entry, sl, tp1, tp2, bal, risk):
+    sl_dist = abs(entry - sl) / entry
+    loss_usd = bal * (risk / 100)
+    pos_size = loss_usd / sl_dist
+    lev = max(1, min(int(0.8 / sl_dist), 10))
+    margin = pos_size / lev
+    
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("BELÉPŐ", f"${entry:,.6f}")
+    c2.metric("STOP LOSS", f"${sl:,.6f}")
+    c3.metric("TAKE PROFIT 1", f"${tp1:,.4f}")
+    c4.metric("TAKE PROFIT 2", f"${tp2:,.4f}")
+    
+    st.markdown("### 📐 Pozíció és Áttétel javaslat:")
+    cc1, cc2, cc3 = st.columns(3)
+    cc1.metric("Javasolt Tőkeáttétel", f"{lev}x")
+    cc2.metric("Megnyitandó méret", f"${pos_size:,.2f}")
+    cc3.metric("Szükséges Margin", f"${margin:,.2f}")
 
 try:
     exch = init_exchange(exchange_id)
@@ -102,18 +123,8 @@ try:
                 
                 if signal != "VÁRAKOZÁS":
                     active_trades_found += 1
-                    sl_dist_pct = abs(entry - sl) / entry
-                    max_loss_usd = total_balance * (risk_percent / 100)
-                    pos_size = max_loss_usd / sl_dist_pct
-                    lev = max(1, min(int(0.8 / sl_dist_pct), 10))
-                    
                     with st.expander(f"🔥 {sym} - JELZÉS: {signal}", expanded=True):
-                        c1, c2, c3, c4 = st.columns(4)
-                        c1.metric("Belépő", f"${entry:,.4f}")
-                        c2.metric("Stop Loss", f"${sl:,.4f}")
-                        c3.metric("Take Profit 1", f"${tp1:,.4f}")
-                        c4.metric("Take Profit 2", f"${tp2:,.4f}")
-                        st.info(f"📐 **Méretezés:** Áttétel: **{lev}x** | Pozíció méret: **${pos_size:,.2f}**")
+                        show_metrics(entry, sl, tp1, tp2, total_balance, risk_percent)
             except:
                 continue
             progress_bar.progress((index + 1) / len(symbols_to_scan))
@@ -166,7 +177,4 @@ try:
                 else:
                     st.error(f"🔥 **JELZÉS:** {signal}")
                 st.write(f"ℹ️ **Piaci logikád megerősítése:** Kialakult az Inverse FVG zóna, az árfolyam a kritikus szinten túl zárt be!")
-                
-                sl_dist_pct = abs(entry_price - stop_loss) / entry_price
-                max_loss_usd = total_balance * (risk_percent / 100)
-                position_size_usd = max_loss_usd / sl_dist_pct
+                show_metrics(entry_price, stop_loss, take_profit_1, take_profit_2, total_balance, risk_percent)
