@@ -43,6 +43,10 @@ st.sidebar.subheader("💰 Kockázatkezelés")
 total_balance = st.sidebar.number_input("Teljes Kereskedési Tőkéd ($):", min_value=10, value=1000)
 risk_percent = st.sidebar.slider("Kockázat (%):", min_value=0.5, max_value=100.0, value=5.0, step=0.5)
 
+st.sidebar.markdown("---")
+# JAVÍTÁS: A gomb visszakerült az oldalsávba, és alapértelmezetten True (BEKAPCSOLT) állapotú!
+run_scanner = st.sidebar.checkbox("Automata Piacszkenner Indítása", value=True)
+
 # API Inicializálás
 exch = getattr(ccxt, exchange_id)({
     'enableRateLimit': True,
@@ -171,58 +175,51 @@ def analyze_pair(pair_symbol):
 st.subheader("🕵️‍♂️ ALGO ICT PRO Élő Automata Piacszkenner")
 scan_depth = st.slider("Átvizsgálandó top aktív párok száma:", min_value=10, max_value=150, value=60, step=10)
 
-active_signals = []
-scan_placeholder = st.empty()
+# CSAK AKKOR INDUL EL, HA A GOMB AKTÍV (Most már fixen az)
+if run_scanner:
+    active_signals = []
+    scan_placeholder = st.empty()
 
-# 1. Háttér feldolgozás
-target_pairs = filtered_symbols[:scan_depth]
-for pair in target_pairs:
-    # Levágjuk a felesleges karaktereket a kijelzéshez
-    display_name = str(pair).split(':')[0] if ':' in str(pair) else str(pair)
-    scan_placeholder.text(f"Piac pásztázása... Ellenőrzés: {display_name}")
-    res = analyze_pair(pair)
-    if res and "VÁRAKOZÁS" not in res["trade_signal"]:
-        active_signals.append((display_name, res))
-    time.sleep(0.02)
+    target_pairs = filtered_symbols[:scan_depth]
+    for pair in target_pairs:
+        display_name = str(pair).split(':') if ':' in str(pair) else str(pair)
+        scan_placeholder.text(f"Piac pásztázása... Ellenőrzés: {display_name}")
+        res = analyze_pair(pair)
+        if res and "VÁRAKOZÁS" not in res["trade_signal"]:
+            active_signals.append((display_name, res))
+        time.sleep(0.02)
 
-scan_placeholder.empty()
+    scan_placeholder.empty()
 
-# 2. FIXÁLT KÉNYZERÍTETT KIRAJZOLÁS EGYSZERRE
-if active_signals:
-    st.success(f"Találatok a piacon (Szigorú 1:3+ RR szűréssel): {len(active_signals)} db aktív setup!")
-    for idx, (display_name, res) in enumerate(active_signals):
-        df_ltf = res["df_ltf"]
-        length = len(df_ltf)
-        
-        # A) FEJLÉC KÁRTYA
-        st.markdown(f"""
-            <div class="signal-header">
-                <h3 style='margin:0; font-size:16px;'>🔥 {display_name} &nbsp;|&nbsp; Idősík: {res['chosen_tf']} &nbsp;|&nbsp; Irány: {res['trade_signal']}</h3>
-            </div>
-        """, unsafe_allow_html=True)
-
-        # B) TRADINGVIEW STÍLUSÚ GRAFIKON (Kényszerített fix, egyszerűsített kulcsstruktúrával)
-        fig = go.Figure()
-        
-        fig.add_trace(go.Candlestick(
-            x=df_ltf['time'], open=df_ltf['open'], high=df_ltf['high'], low=df_ltf['low'], close=df_ltf['close'],
-            increasing_line_color='#089981', decreasing_line_color='#f23645',
-            increasing_fillcolor='#089981', decreasing_fillcolor='#f23645', name="Ár"
-        ))
-        
-        fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["htf_high"]]*length, name="HTF High", line=dict(color='#26a69a', width=1.5)))
-        fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["htf_low"]]*length, name="HTF Low", line=dict(color='#ef5350', width=1.5)))
-        fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["entry_price"]]*length, name="Belépő", line=dict(color='#29b6f6', width=2)))
-        fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["sl"]]*length, name="SL", line=dict(color='#ff1744', width=1.5, dash='dash')))
-        fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["tp"]]*length, name="TP", line=dict(color='#00e676', width=1.5)))
-
-        if res["fvg_high"] > 0 and res["fvg_idx"] is not None:
-            s_idx = int(res["fvg_idx"])
-            e_idx = int(min(s_idx + 15, length - 1))
+    if active_signals:
+        st.success(f"Találatok a piacon (Szigorú 1:3+ RR szűréssel): {len(active_signals)} db aktív setup!")
+        for idx, (display_name, res) in enumerate(active_signals):
+            df_ltf = res["df_ltf"]
+            length = len(df_ltf)
             
-            t_start = df_ltf['time'].iloc[s_idx]
-            t_end = df_ltf['time'].iloc[e_idx]
+            # A) FEJLÉC KÁRTYA
+            st.markdown(f"""
+                <div class="signal-header">
+                    <h3 style='margin:0; font-size:16px;'>🔥 {display_name} &nbsp;|&nbsp; Idősík: {res['chosen_tf']} &nbsp;|&nbsp; Irány: {res['trade_signal']}</h3>
+                </div>
+            """, unsafe_allow_html=True)
+
+            # B) TRADINGVIEW STÍLUSÚ GRAFIKON COORD-SZINKRONNAL
+            fig = go.Figure()
             
-            bx = [t_start, t_end, t_end, t_start, t_start]
-            by = [res["fvg_high"], res["fvg_high"], res["fvg_low"], res["fvg_low"], res["fvg_high"]]
+            fig.add_trace(go.Candlestick(
+                x=df_ltf['time'], open=df_ltf['open'], high=df_ltf['high'], low=df_ltf['low'], close=df_ltf['close'],
+                increasing_line_color='#089981', decreasing_line_color='#f23645',
+                increasing_fillcolor='#089981', decreasing_fillcolor='#f23645', name="Ár"
+            ))
             
+            fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["htf_high"]]*length, name="HTF High", line=dict(color='#26a69a', width=1.5)))
+            fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["htf_low"]]*length, name="HTF Low", line=dict(color='#ef5350', width=1.5)))
+            fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["entry_price"]]*length, name="Belépő", line=dict(color='#29b6f6', width=2)))
+            fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["sl"]]*length, name="SL", line=dict(color='#ff1744', width=1.5, dash='dash')))
+            fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["tp"]]*length, name="TP", line=dict(color='#00e676', width=1.5)))
+
+            if res["fvg_high"] > 0 and res["fvg_idx"] is not None:
+                s_idx = int(res["fvg_idx"])
+                e_idx = int(min(s_idx + 15, length - 1))
+                
