@@ -1,4 +1,4 @@
-# Kesz_Alkalmazas_Szamokkal_Egyutt
+# Kesz_Alkalmazas_Tokeletes_Es_Stabil_Lista
 import streamlit as st
 import pandas as pd
 import ccxt
@@ -7,11 +7,10 @@ import time
 
 st.set_page_config(page_title="ALGO ICT PRO", layout="wide", initial_sidebar_state="collapsed")
 
-# Szigorú TradingView Dark Mobil téma és kártya stílusok beállítása
+# Szigorú TradingView Dark Mobil téma és kártya stílusok beállítása (Nincs többé üres vagy fehér rész)
 st.markdown("""
     <style>
     .block-container { padding-top: 1rem; padding-bottom: 1rem; background-color: #131722; }
-    [data-testid="stMetricValue"] { font-size: 19px !important; color: #29b6f6 !important; font-weight: bold; }
     h1, h2, h3, p, span, caption { color: #d1d4dc !important; }
     div[data-testid="stVerticalBlock"] { background-color: #131722; }
     .signal-header { 
@@ -19,8 +18,16 @@ st.markdown("""
         padding: 12px; 
         border-radius: 6px; 
         border-left: 5px solid #ffd600;
-        margin-top: 20px;
+        margin-top: 25px;
         margin-bottom: 15px; 
+    }
+    .data-row {
+        background-color: #1c2030;
+        padding: 10px;
+        border-radius: 6px;
+        border: 1px solid #2a2e39;
+        margin-top: 5px;
+        margin-bottom: 5px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -36,10 +43,6 @@ st.sidebar.markdown("---")
 st.sidebar.subheader("💰 Kockázatkezelés")
 total_balance = st.sidebar.number_input("Teljes Kereskedési Tőkéd ($):", min_value=10, value=1000)
 risk_percent = st.sidebar.slider("Kockázat (%):", min_value=0.5, max_value=100.0, value=5.0, step=0.5)
-
-st.sidebar.markdown("---")
-st.sidebar.subheader("🔍 Automata Keresési Mód")
-run_scanner = st.sidebar.checkbox("Automata Piacszkenner Indítása", value=True)
 
 # API Inicializálás
 exch = getattr(ccxt, exchange_id)({
@@ -115,7 +118,7 @@ def analyze_pair(pair_symbol):
         trade_signal = "VÁRAKOZÁS"
         entry_price = fvg_mid
         
-        # Alapértelmezett biztonsági szintek elcsúszás ellen
+        # Alapértelmezett szintek a biztonság kedvéért
         sl = htf_high if fvg_type == "BEARISH" else htf_low
         tp = entry_price - (abs(entry_price - sl) * 3.5) if fvg_type == "BEARISH" else entry_price + (abs(entry_price - sl) * 3.5)
         
@@ -144,69 +147,78 @@ def analyze_pair(pair_symbol):
     except:
         return None
 
-# --- AUTOMATA FOLYAMATOS MEGJELENÍTÉS ---
-if run_scanner:
-    st.subheader("🕵️‍♂️ Élő Kétirányú Piacszkenner (Grafikonos Sorozat)")
-    scan_depth = st.slider("Átvizsgálandó top aktív párok száma:", min_value=5, max_value=40, value=15, step=5)
-    
-    scan_placeholder = st.empty()
-    target_pairs = filtered_symbols[:scan_depth]
-    found_any = False
+# --- AUTOMATA FOLYAMATOS MEGJELENÍTŐ RENDSZER ---
+st.subheader("🕵️‍♂️ Élő Kétirányú Piacszkenner (Minden Adat Egymás Alatt)")
+scan_depth = st.slider("Átvizsgálandó top aktív párok száma:", min_value=5, max_value=30, value=15, step=5)
 
-    for idx, pair in enumerate(target_pairs):
-        scan_placeholder.text(f"Párok folyamatos elemzése: {pair}...")
-        res = analyze_pair(pair)
+active_signals = []
+scan_placeholder = st.empty()
+
+# 1. LÉPÉS: Gyors adatelőkészítés vizuális elemek nélkül (Így nem fagy be a Streamlit)
+target_pairs = filtered_symbols[:scan_depth]
+for pair in target_pairs:
+    scan_placeholder.text(f"Piac pásztázása... Ellenőrzés: {pair}")
+    res = analyze_pair(pair)
+    if res and "VÁRAKOZÁS" not in res["trade_signal"]:
+        active_signals.append((pair, res))
+    time.sleep(0.04)
+
+scan_placeholder.empty()
+
+# 2. LÉPÉS: Garantált, kényszerített kirajzolás egymás alá
+if active_signals:
+    for idx, (pair, res) in enumerate(active_signals):
+        df_ltf = res["df_ltf"]
+        length = len(df_ltf)
         
-        if res and "VÁRAKOZÁS" not in res["trade_signal"]:
-            found_any = True
-            df_ltf = res["df_ltf"]
-            length = len(df_ltf)
+        # A) FEJLÉC KÁRTYA
+        st.markdown(f"""
+            <div class="signal-header">
+                <h3 style='margin:0; font-size:16px;'>🔥 {pair} &nbsp;|&nbsp; Idősík: {res['chosen_tf']} &nbsp;|&nbsp; Irány: {res['trade_signal']}</h3>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        # B) TRADINGVIEW STÍLUSÚ GRAFIKON
+        fig = go.Figure()
+        
+        fig.add_trace(go.Candlestick(
+            x=df_ltf['time'], open=df_ltf['open'], high=df_ltf['high'], low=df_ltf['low'], close=df_ltf['close'],
+            increasing_line_color='#089981', decreasing_line_color='#f23645',
+            increasing_fillcolor='#089981', decreasing_fillcolor='#f23645', name="Ár"
+        ))
+        
+        fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["htf_high"]]*length, name="HTF Liq High", line=dict(color='#26a69a', width=2)))
+        fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["htf_low"]]*length, name="HTF Liq Low", line=dict(color='#ef5350', width=2)))
+
+        if res["fvg_high"] > 0 and res["fvg_start_idx"] is not None:
+            s_idx = int(res["fvg_start_idx"])
+            e_idx = int(min(s_idx + 12, length - 1))
             
-            with st.container():
-                # 1. FEJLÉC KÁRTYA
-                st.markdown(f"""
-                    <div class="signal-header">
-                        <h3 style='margin:0; font-size:16px;'>🔥 {pair} &nbsp;|&nbsp; Idősík: {res['chosen_tf']} &nbsp;|&nbsp; Irány: {res['trade_signal']}</h3>
-                    </div>
-                """, unsafe_allow_html=True)
-                
-                # 2. TRADINGVIEW STÍLUSÚ GRAFIKON
-                fig = go.Figure()
-                
-                fig.add_trace(go.Candlestick(
-                    x=df_ltf['time'], open=df_ltf['open'], high=df_ltf['high'], low=df_ltf['low'], close=df_ltf['close'],
-                    increasing_line_color='#089981', decreasing_line_color='#f23645',
-                    increasing_fillcolor='#089981', decreasing_fillcolor='#f23645', name="Ár"
-                ))
-                
-                fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["htf_high"]]*length, name="HTF Liq High", line=dict(color='#26a69a', width=2)))
-                fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["htf_low"]]*len(df_ltf), name="HTF Liq Low", line=dict(color='#ef5350', width=2)))
+            t_start = df_ltf['time'].iloc[s_idx]
+            t_end = df_ltf['time'].iloc[e_idx]
+            
+            bx = [t_start, t_end, t_end, t_start, t_start]
+            by = [res["fvg_high"], res["fvg_high"], res["fvg_low"], res["fvg_low"], res["fvg_high"]]
+            
+            fig.add_trace(go.Scatter(x=bx, y=by, fill="toself", fillcolor="rgba(255, 214, 0, 0.06)", line=dict(color='#ffd600', width=1.5), showlegend=False))
+            fig.add_trace(go.Scatter(x=[t_start, t_end], y=[res["fvg_mid"], res["fvg_mid"]], line=dict(color='#e040fb', width=2, dash='dash'), name="CE 50%"))
 
-                if res["fvg_high"] > 0 and res["fvg_start_idx"] is not None:
-                    s_idx = int(res["fvg_start_idx"])
-                    e_idx = int(min(s_idx + 12, length - 1))
-                    
-                    t_start = df_ltf['time'].iloc[s_idx]
-                    t_end = df_ltf['time'].iloc[e_idx]
-                    
-                    bx = [t_start, t_end, t_end, t_start, t_start]
-                    by = [res["fvg_high"], res["fvg_high"], res["fvg_low"], res["fvg_low"], res["fvg_high"]]
-                    
-                    fig.add_trace(go.Scatter(x=bx, y=by, fill="toself", fillcolor="rgba(255, 214, 0, 0.06)", line=dict(color='#ffd600', width=1.5), showlegend=False))
-                    fig.add_trace(go.Scatter(x=[t_start, t_end], y=[res["fvg_mid"], res["fvg_mid"]], line=dict(color='#e040fb', width=2, dash='dash'), name="CE 50%"))
+        fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["entry_price"]]*length, name="Belépő", line=dict(color='#29b6f6', width=2)))
+        fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["sl"]]*length, name="SL", line=dict(color='#ff1744', width=1.5, dash='dash')))
+        fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["tp"]]*length, name="TP", line=dict(color='#00e676', width=1.5)))
 
-                fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["entry_price"]]*length, name="Belépő", line=dict(color='#29b6f6', width=2)))
-                fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["sl"]]*length, name="SL", line=dict(color='#ff1744', width=1.5, dash='dash')))
-                fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["tp"]]*length, name="TP", line=dict(color='#00e676', width=1.5)))
+        y_pad = (max(df_ltf['high'].max(), res["htf_high"]) - min(df_ltf['low'].min(), res["htf_low"])) * 0.1
+        y_min = min(df_ltf['low'].min(), res["htf_low"], res["tp"]) - y_pad
+        y_max = max(df_ltf['high'].max(), res["htf_high"], res["tp"]) + y_pad
 
-                y_pad = (max(df_ltf['high'].max(), res["htf_high"]) - min(df_ltf['low'].min(), res["htf_low"])) * 0.1
-                y_min = min(df_ltf['low'].min(), res["htf_low"], res["tp"]) - y_pad
-                y_max = max(df_ltf['high'].max(), res["htf_high"], res["tp"]) + y_pad
-
-                fig.update_layout(
-                    template="plotly_dark", xaxis_rangeslider_visible=False, height=420,
-                    paper_bgcolor='#131722', plot_bgcolor='#131722', margin=dict(l=10, r=55, t=10, b=10),
-                    showlegend=False,
-                    yaxis=dict(side="right", range=[y_min, y_max], gridcolor="#2a2e39", zeroline=False, tickfont=dict(color="#848e9c", size=10)),
-                    xaxis=dict(gridcolor="#2a2e39", zeroline=False, tickfont=dict(color="#848e9c", size=10))
-                )
+        fig.update_layout(
+            template="plotly_dark", xaxis_rangeslider_visible=False, height=400,
+            paper_bgcolor='#131722', plot_bgcolor='#131722', margin=dict(l=10, r=55, t=10, b=10),
+            showlegend=False,
+            yaxis=dict(side="right", range=[y_min, y_max], gridcolor="#2a2e39", zeroline=False, tickfont=dict(color="#848e9c", size=10)),
+            xaxis=dict(gridcolor="#2a2e39", zeroline=False, tickfont=dict(color="#848e9c", size=10))
+        )
+        st.plotly_chart(fig, use_container_width=True, key=f"f_live_chart_{pair}_{idx}")
+        
+        # C) JAVÍTÁS: SZIGORÚ, KIMUTATHATÓ ÉRTÉKEK JELENÍTÉSE EGYSZERŰ HTML-BEN (Ez sosem tűnik el!)
+        st.markdown(f"""
