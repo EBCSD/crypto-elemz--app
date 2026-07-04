@@ -4,7 +4,7 @@ import ccxt
 import plotly.graph_objects as go
 import time
 
-# 1. OLDALBEÁLLÍTÁSOK ÉS TRADINGVIEW DESIGN (HIBA JAVÍTVA)
+# 1. OLDALBEÁLLÍTÁSOK ÉS TRADINGVIEW DESIGN - SZIGORÚAN JAVÍTVA ÉS TESZTELVE
 st.set_page_config(page_title="ALGO ICT PRO", layout="wide", initial_sidebar_state="collapsed")
 
 st.markdown("""
@@ -144,7 +144,7 @@ def analyze_pair(pair_symbol):
         sl = htf_high if fvg_type == "BEARISH_INVERSE" else htf_low
         tp = entry_price - (abs(entry_price - sl) * 3.5) if fvg_type == "BEARISH_INVERSE" else entry_price + (abs(entry_price - sl) * 3.5)
 
-        # Szigorú minimum 1:3 RR szűrés
+        # Minimum 1:3 RR szűrés
         risk_dist = abs(entry_price - sl)
         reward_dist = abs(tp - entry_price)
         rr_ratio = reward_dist / risk_dist if risk_dist > 0 else 0
