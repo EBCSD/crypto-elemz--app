@@ -43,10 +43,10 @@ def get_active_markets():
 
 filtered_symbols = get_active_markets()
 
-# HAJSZÁLPONTOS INVERZ FVG MOTOR
+# VALÓDI LUMIA-STÍLUSÚ INVERZ FVG STRATÉGIAI MOTOR
 def analyze_pair(pair_symbol):
     try:
-        clean_symbol = pair_symbol.split(':')[0] if ':' in pair_symbol else pair_symbol
+        clean_symbol = pair_symbol.split(':') if ':' in pair_symbol else pair_symbol
         htf_1h = exch.fetch_ohlcv(clean_symbol, timeframe='1h', limit=48)
         htf_4h = exch.fetch_ohlcv(clean_symbol, timeframe='4h', limit=24)
         if not htf_1h or not htf_4h: return None
@@ -56,7 +56,7 @@ def analyze_pair(pair_symbol):
         htf_high = max(float(df_1h['high'].iloc[:-2].max()), float(df_4h['high'].iloc[:-2].max()))
         htf_low = min(float(df_1h['low'].iloc[:-2].min()), float(df_4h['low'].iloc[:-2].min()))
 
-        ltf_ohlcv = exch.fetch_ohlcv(clean_symbol, timeframe='15m', limit=40)
+        ltf_ohlcv = exch.fetch_ohlcv(clean_symbol, timeframe='15m', limit=45)
         if not ltf_ohlcv: return None
         df_ltf = pd.DataFrame(ltf_ohlcv, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
         df_ltf['time'] = pd.to_datetime(df_ltf['time'], unit='ms')
@@ -67,39 +67,73 @@ def analyze_pair(pair_symbol):
         fvg_idx = 0
         fvg_type = "NONE"
 
-        for i in range(length - 5, 2, -1):
-            if df_ltf['high'].iloc[i] < df_ltf['low'].iloc[i+2]:
-                fvg_high = float(df_ltf['low'].iloc[i+2])
-                fvg_low = float(df_ltf['high'].iloc[i])
-                fvg_idx = i
-                fvg_type = "BEARISH_INVERSE"
-                found_ifvg = True
-                break
-            elif df_ltf['low'].iloc[i] > df_ltf['high'].iloc[i+2]:
-                fvg_high = float(df_ltf['low'].iloc[i])
-                fvg_low = float(df_ltf['high'].iloc[i+2])
-                fvg_idx = i
-                fvg_type = "BULLISH_INVERSE"
-                found_ifvg = True
-                break
+        # SZIGORÍTÁS A KÉPED ALAPJÁN: iFVG szűrés megfelelő sorrendben
+        for i in range(2, length - 5):
+            # 1. SHORT MINTA (Mint a LUMIA képeden): Eredetileg medve FVG, amit ÁTÜTÖTTEK felfelé, majd jött a felső söprés
+            if df_ltf['low'].iloc[i] > df_ltf['high'].iloc[i+2]:
+                o_high = float(df_ltf['low'].iloc[i])
+                o_low = float(df_ltf['high'].iloc[i+2])
+                
+                post_df = df_ltf.iloc[i+3:]
+                was_inversed = post_df['close'].max() > o_high # Testtel átütötte felfelé (Inverzió)
+                was_swept = post_df['high'].max() >= htf_high # Ezután kisöpörte a HTF likviditást fentről
+                
+                if was_inversed and was_swept:
+                    fvg_high, fvg_low = o_high, o_low
+                    fvg_idx = i
+                    fvg_type = "BEARISH_INVERSE" # Ebből lesz a short visszateszt
+                    found_ifvg = True
+                    break
+                    
+            # 2. LONG MINTA (A short tökéletes ellentéte): Eredetileg bika FVG, amit LETÖRTEK, majd jött az alsó söpörgetés
+            elif df_ltf['high'].iloc[i] < df_ltf['low'].iloc[i+2]:
+                o_high = float(df_ltf['low'].iloc[i+2])
+                o_low = float(df_ltf['high'].iloc[i])
+                
+                post_df = df_ltf.iloc[i+3:]
+                was_inversed = post_df['close'].min() < o_low # Testtel letörte lefelé (Inverzió)
+                was_swept = post_df['low'].min() <= htf_low # Ezután kisöpörte a lenti HTF likviditást
+                
+                if was_inversed and was_swept:
+                    fvg_high, fvg_low = o_high, o_low
+                    fvg_idx = i
+                    fvg_type = "BULLISH_INVERSE" # Ebből lesz a long visszateszt
+                    found_ifvg = True
+                    break
 
         if not found_ifvg: return None
+        
         current_price = float(df_ltf['close'].iloc[-1])
         fvg_mid = (fvg_high + fvg_low) / 2.0
         entry_price = fvg_mid
-        sl = htf_high if fvg_type == "BEARISH_INVERSE" else htf_low
-        tp = entry_price - (abs(entry_price - sl) * 3.5) if fvg_type == "BEARISH_INVERSE" else entry_price + (abs(entry_price - sl) * 3.5)
+        
+        # FIXÁLT PONTOS SZINTEK: Shortnál az SL a HTF csúcs, a TP lenn van. Longnál fordítva.
+        if fvg_type == "BEARISH_INVERSE":
+            sl = htf_high
+            tp = entry_price - (abs(entry_price - sl) * 3.5)
+        else:
+            sl = htf_low
+            tp = entry_price + (abs(entry_price - sl) * 3.5)
 
+        # Szigorú minimum 1:3 RR szűrés
         risk_dist = abs(entry_price - sl)
         reward_dist = abs(tp - entry_price)
         rr_ratio = reward_dist / risk_dist if risk_dist > 0 else 0
         if rr_ratio < 3.0: return None
 
+        # Tőkeáttétel javaslat (Max 10x)
         sl_percent = (risk_dist / entry_price) if entry_price > 0 else 0.01
         calculated_leverage = int((risk_percent / 100.0) / sl_percent) if sl_percent > 0 else 1
         leverage_suggestion = max(1, min(calculated_leverage, 10))
 
-        trade_signal = "SHORT / SELL" if fvg_type == "BEARISH_INVERSE" else "LONG / BUY"
+        # ÉLES JELZÉS: Csak akkor jelez, ha az aktuális ár éppen a sárga doboz határain belül/CE vonalon van!
+        trade_signal = "VÁRAKOZÁS"
+        if fvg_type == "BEARISH_INVERSE" and current_price >= (fvg_low * 0.998) and current_price <= (fvg_high * 1.002):
+            trade_signal = "SHORT / SELL"
+        elif fvg_type == "BULLISH_INVERSE" and current_price <= (fvg_high * 1.002) and current_price >= (fvg_low * 0.998):
+            trade_signal = "LONG / BUY"
+
+        if trade_signal == "VÁRAKOZÁS": return None
 
         return {
             "df_ltf": df_ltf, "htf_high": htf_high, "htf_low": htf_low, "current_price": current_price,
@@ -125,7 +159,7 @@ def render_signal_block(display_name, res, unique_id):
 
     if res["fvg_high"] > 0 and res["fvg_idx"] is not None:
         s_idx = int(res["fvg_idx"])
-        e_idx = int(min(s_idx + 15, length - 1))
+        e_idx = length - 1 # Kivisszük a legutolsó gyertyáig, pont mint a TradingView dobozod!
         bx = [df_ltf['time'].iloc[s_idx], df_ltf['time'].iloc[e_idx], df_ltf['time'].iloc[e_idx], df_ltf['time'].iloc[s_idx], df_ltf['time'].iloc[s_idx]]
         by = [res["fvg_high"], res["fvg_high"], res["fvg_low"], res["fvg_low"], res["fvg_high"]]
         fig.add_trace(go.Scatter(x=bx, y=by, fill="toself", fillcolor="rgba(255, 214, 0, 0.04)", line=dict(color='#ffd600', width=1.5), showlegend=False))
@@ -138,26 +172,12 @@ def render_signal_block(display_name, res, unique_id):
     st.write(f"⚙️ **JAVASOLT TŐKEÁTTÉTEL:** {res['leverage']}x (Max 10x) | 📊 **R:R ARÁNY / AKTUÁLIS ÁR:** 1:{res['rr']} | ${res['current_price']:.5f}")
     st.markdown("---")
 
-# --- JAVÍTOTT FŐ VEZÉRLŐ LOGIKA (NINCS TÖBBÉ LIMIT) ---
+# --- FŐ VEZÉRLŐ LOGIKA ---
 if run_scanner:
     st.subheader("🕵️‍♂️ ALGO ICT PRO Élő Automata Piacszkenner")
     scan_placeholder = st.empty()
-    # JAVÍTÁS: Kiszedtük a [:40] korlátozást, így a TELJES piacot szkenneli (A-tól Z-ig az összes párt!)
     for idx, pair in enumerate(filtered_symbols):
-        display_name = str(pair).split(':')[0] if ':' in str(pair) else str(pair)
+        display_name = str(pair).split(':') if ':' in str(pair) else str(pair)
         scan_placeholder.text(f"Piac átfésülése ({idx+1}/{len(filtered_symbols)}): {display_name}")
         res = analyze_pair(pair)
         if res: 
-            render_signal_block(display_name, res, f"scan_mode_{idx}")
-        time.sleep(0.01)
-    scan_placeholder.empty()
-
-if not run_scanner:
-    st.subheader("🎯 Kézi Elemzés és Egyedi Keresés")
-    lumia_index = filtered_symbols.index("LUMIA/USDT") if "LUMIA/USDT" in filtered_symbols else 0
-    selected_pair = st.selectbox("Válassz ki egy konkrét párt az azonnali elemzéshez:", filtered_symbols, index=lumia_index)
-    manual_res = analyze_pair(selected_pair)
-    if manual_res: 
-        render_signal_block(selected_pair, manual_res, "manual_mode")
-    if not manual_res: 
-        st.info(f"A(z) {selected_pair} páron jelenleg nincs aktív iFVG szerkezet.")
