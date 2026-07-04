@@ -1,112 +1,64 @@
 # Kesz_Alkalmazas
 import streamlit as st
-import pandas as pd
-import plotly.graph_objects as go
-from tradingview_screener import Query, col
+import streamlit.components.v1 as components
 
 st.set_page_config(page_title="ICT Crypto Bot", layout="wide", initial_sidebar_state="collapsed")
 st.title("🏹 ICT Liquidity & Leverage Assistant")
 
-st.sidebar.header("⚙️ Beállítások")
-exchange = st.sidebar.selectbox("Tőzsde:", ["BITGET", "BINANCE", "BYBIT", "OKX"])
-market_type = st.sidebar.radio("Piac:", ["Futures", "Spot"])
+st.markdown("### 💰 Kockázat & Tőke Pozíciótervező")
+st.write("Számold ki a pontos pozícióméretedet és áttételedet a trade megnyitása előtt:")
 
-st.markdown("### 💰 Kockázat & Tőke Beállítások")
-col_toke, col_kock = st.columns(2)
+col_toke, col_kock, col_sl = st.columns(3)
 with col_toke:
     total_balance = st.number_input("Teljes Kereskedési Tőkéd ($):", min_value=10, value=1000, step=50)
 with col_kock:
     risk_percent = st.slider("Megengedett kockázat (%):", min_value=0.5, max_value=5.0, value=1.0, step=0.5)
+with col_sl:
+    sl_percent = st.number_input("Tervezett Stop Loss távolság (%-ban):", min_value=0.1, max_value=20.0, value=2.0, step=0.5)
 
-@st.cache_data(ttl=30)
-def get_crypto_data(exch):
-    q = (Query()
-         .set_markets('crypto')
-         .where(col('exchange') == exch)
-         .select('name', 'close', 'volume', 'high', 'low', 'high|1h', 'low|1h', 'EMA20', 'ATR', 'RSI'))
-    
-    # Adatok lekérése a TradingView-ról
-    _, data = q.get_scanner_data()
-    
-    # Biztonságos adatkezelés: közvetlenül a kapott DataFrame-et adjuk vissza
-    df = pd.DataFrame(data)
-    return df
+# Matematikai kalkulátor futtatása
+max_loss_usd = total_balance * (risk_percent / 100)
+sl_decimal = sl_percent / 100
+position_size_usd = max_loss_usd / sl_decimal
 
-try:
-    df = get_crypto_data(exchange)
-    
-    if not df.empty:
-        # A TradingView oszlopnevek ellenőrzése és tisztítása
-        if 'ticker' in df.columns and 'name' not in df.columns:
-            df['name'] = df['ticker']
-            
-        if 'name' in df.columns:
-            if market_type == "Futures":
-                df = df[df['name'].str.contains('PERP|USDT|USD!', case=False, na=False)]
-            else:
-                df = df[~df['name'].str.contains('PERP', case=False, na=False)]
-            
-            pairs = df['name'].tolist()
-        else:
-            pairs = []
-    else:
-        pairs = []
+# Biztonságos áttétel meghatározása (max 50x)
+recommended_leverage = int(0.8 / sl_decimal) if sl_decimal > 0 else 1
+recommended_leverage = max(1, min(recommended_leverage, 50))
+required_margin = position_size_usd / recommended_leverage
 
-    selected_pair = st.selectbox("🎯 Válassz kriptopárt:", pairs if pairs else ["Nincs elérhető adat"])
+# Eredmények doboz
+cc1, cc2, cc3 = st.columns(3)
+cc1.metric("Kockáztatott összeg", f"${max_loss_usd:,.2f}")
+cc2.metric("Javasolt Tőkeáttétel", f"{recommended_leverage}x")
+cc3.metric("Megnyitandó méret", f"${position_size_usd:,.2f} (Margin: ${required_margin:,.2f})")
 
-    if selected_pair and pairs and selected_pair != "Nincs elérhető adat":
-        coin = df[df['name'] == selected_pair].iloc[0]
-        
-        price = float(coin['close'])
-        ltf_high = float(coin['high'])
-        ltf_low = float(coin['low'])
-        htf_high = float(coin['high|1h'])
-        htf_low = float(coin['low|1h'])
-        atr = float(coin['ATR']) if pd.notna(coin['ATR']) else (price * 0.01)
-        ema20 = float(coin['EMA20']) if pd.notna(coin['EMA20']) else price
-        
-        trade_signal = "VÁRAKOZÁS"
-        if ltf_low <= htf_low and price > ema20:
-            trade_signal = "LONG / BUY"
-            entry = price
-            sl = htf_low - (0.2 * atr)
-            tp = htf_high
-        elif ltf_high >= htf_high and price < ema20:
-            trade_signal = "SHORT / SELL"
-            entry = price
-            sl = htf_high + (0.2 * atr)
-            tp = ltf_low
+st.markdown("---")
+st.markdown("### 📊 Élő TradingView Kripto Szűrő & Bitget Párok")
+st.write("Használd a felső szűrőket (pl. Exchange: BITGET, Market: Futures) a sweep-ek kereséséhez:")
 
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Aktuális Ár", f"${price:,.4f}")
-        c2.metric("Jelzés", trade_signal)
-        c3.metric("Kockázat ($)", f"${(total_balance * (risk_percent/100)):,.2f}")
+# Hivatalos, interaktív TradingView Screener beágyazása
+screener_html = """
+<div class="tradingview-widget-container" style="height:600px;width:100%;">
+  <div class="tradingview-widget-container__widget" style="height:600px;width:100%;"></div>
+  <script type="text/javascript" src="https://tradingview.com" async>
+  {
+  "width": "100%",
+  "height": "100%",
+  "defaultColumn": "overview",
+  "screener_type": "crypto_mkt",
+  "displayCurrency": "USD",
+  "colorTheme": "dark",
+  "locale": "en"
+}
+  </script>
+</div>
+"""
 
-        if trade_signal != "VÁRAKOZÁS":
-            st.markdown("### ⚡ Számított Pozíció")
-            sl_distance_percent = abs(entry - sl) / entry
-            max_loss_usd = total_balance * (risk_percent / 100)
-            position_size_usd = max_loss_usd / sl_distance_percent
-            recommended_leverage = int(0.8 / sl_distance_percent)
-            recommended_leverage = max(1, min(recommended_leverage, 50))
-            required_margin = position_size_usd / recommended_leverage
-
-            cc1, cc2, cc3 = st.columns(3)
-            with cc1:
-                st.success(f"**Belépő:** ${entry:,.4f}\n\n**Stop Loss:** ${sl:,.4f}\n\n**Take Profit:** ${tp:,.4f}")
-            with cc2:
-                st.warning(f"**Javasolt Tőkeáttétel:** {recommended_leverage}x")
-            with cc3:
-                st.info(f"**Méret:** ${position_size_usd:,.2f}\n\n**Margin:** ${required_margin:,.2f}")
-        else:
-            st.info("⏳ Nincs aktív sweep. Várunk a likviditás kiszedésére.")
-    else:
-        st.warning("Válassz egy másik tőzsdét vagy piacot az oldalsó menüben a frissítéshez.")
-except Exception as e:
-    st.error(f"Hiba az adatok feldolgozásában: {e}")
-
+components.html(screener_html, height=620, scrolling=True)
 
     
+
+             
     
     
 
