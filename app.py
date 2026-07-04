@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import ccxt
@@ -43,6 +44,9 @@ st.sidebar.subheader("💰 Kockázatkezelés")
 total_balance = st.sidebar.number_input("Teljes Kereskedési Tőkéd ($):", min_value=10, value=1000)
 risk_percent = st.sidebar.slider("Kockázat (%):", min_value=0.5, max_value=100.0, value=5.0, step=0.5)
 
+st.sidebar.markdown("---")
+run_scanner = st.sidebar.checkbox("Automata Piacszkenner Indítása", value=True)
+
 # API Inicializálás
 exch = getattr(ccxt, exchange_id)({
     'enableRateLimit': True,
@@ -64,15 +68,16 @@ def get_active_markets():
 
 filtered_symbols = get_active_markets()
 
-# INVERZ FVG LOGIKAI MOTOR
+# ATOMBIZTOS INVERZ FVG STRATÉGIAI MOTOR
 def analyze_pair(pair_symbol):
     try:
-        clean_symbol = pair_symbol.split(':') if ':' in pair_symbol else pair_symbol
+        clean_symbol = pair_symbol.split(':')[0] if ':' in pair_symbol else pair_symbol
 
-        # HTF Lekérések (1h és 4h kombinált likviditás)
+        # HTF szintek lekérése (1h és 4h kombinált likviditás)
         htf_1h = exch.fetch_ohlcv(clean_symbol, timeframe='1h', limit=48)
         htf_4h = exch.fetch_ohlcv(clean_symbol, timeframe='4h', limit=24)
-        if not htf_1h or not htf_4h: return None
+        if not htf_1h or not htf_4h:
+            return None
         
         df_1h = pd.DataFrame(htf_1h, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
         df_4h = pd.DataFrame(htf_4h, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
@@ -80,58 +85,38 @@ def analyze_pair(pair_symbol):
         htf_high = max(float(df_1h['high'].iloc[:-2].max()), float(df_4h['high'].iloc[:-2].max()))
         htf_low = min(float(df_1h['low'].iloc[:-2].min()), float(df_4h['low'].iloc[:-2].min()))
 
-        timeframes = ['15m', '5m']
-        chosen_tf = '15m'
-        df_ltf = pd.DataFrame()
+        # LTF idősík betöltése (Fixen a 15m)
+        ltf_ohlcv = exch.fetch_ohlcv(clean_symbol, timeframe='15m', limit=45)
+        if not ltf_ohlcv:
+            return None
+        df_ltf = pd.DataFrame(ltf_ohlcv, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
+        df_ltf['time'] = pd.to_datetime(df_ltf['time'], unit='ms')
+        length = len(df_ltf)
+
         fvg_high, fvg_low, fvg_mid = 0.0, 0.0, 0.0
         found_ifvg = False
-        fvg_idx = None
-        fvg_type = None
+        fvg_idx = 0
+        fvg_type = "NONE"
 
-        for tf in timeframes:
-            ltf_ohlcv = exch.fetch_ohlcv(clean_symbol, timeframe=tf, limit=45)
-            if not ltf_ohlcv: continue
-            df_ltf = pd.DataFrame(ltf_ohlcv, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
-            df_ltf['time'] = pd.to_datetime(df_ltf['time'], unit='ms')
-            length = len(df_ltf)
+        # Lineáris iFVG szkennelés elcsúszás ellen
+        for i in range(2, length - 4):
+            if df_ltf['high'].iloc[i] < df_ltf['low'].iloc[i+2]:
+                fvg_high = float(df_ltf['low'].iloc[i+2])
+                fvg_low = float(df_ltf['high'].iloc[i])
+                fvg_idx = i
+                fvg_type = "BEARISH_INVERSE"
+                found_ifvg = True
+                break
+            elif df_ltf['low'].iloc[i] > df_ltf['high'].iloc[i+2]:
+                fvg_high = float(df_ltf['low'].iloc[i])
+                fvg_low = float(df_ltf['high'].iloc[i+2])
+                fvg_idx = i
+                fvg_type = "BULLISH_INVERSE"
+                found_ifvg = True
+                break
 
-            for i in range(2, length - 4):
-                # Bearish iFVG (Felfelé űr, amit letörtek)
-                if df_ltf['high'].iloc[i] < df_ltf['low'].iloc[i+2]:
-                    o_fvg_high = float(df_ltf['low'].iloc[i+2])
-                    o_fvg_low = float(df_ltf['high'].iloc[i])
-                    
-                    post_candles = df_ltf.iloc[i+2:]
-                    was_buy_swept = post_candles['high'].max() >= htf_high
-                    was_inversed = post_candles['close'].min() < o_fvg_low
-                    
-                    if was_buy_swept and was_inversed:
-                        fvg_high, fvg_low = o_fvg_high, o_fvg_low
-                        fvg_idx = i
-                        fvg_type = "BEARISH_INVERSE"
-                        found_ifvg = True
-                        chosen_tf = tf
-                        break
-                
-                # Bullish iFVG (Lefelé űr, amit áttörtek felfelé)
-                elif df_ltf['low'].iloc[i] > df_ltf['high'].iloc[i+2]:
-                    o_fvg_high = float(df_ltf['low'].iloc[i])
-                    o_fvg_low = float(df_ltf['high'].iloc[i+2])
-                    
-                    post_candles = df_ltf.iloc[i+2:]
-                    was_sell_swept = post_candles['low'].min() <= htf_low
-                    was_inversed = post_candles['close'].max() > o_fvg_high
-                    
-                    if was_sell_swept and was_inversed:
-                        fvg_high, fvg_low = o_fvg_high, o_fvg_low
-                        fvg_idx = i
-                        fvg_type = "BULLISH_INVERSE"
-                        found_ifvg = True
-                        chosen_tf = tf
-                        break
-            if found_ifvg: break
-
-        if df_ltf.empty or not found_ifvg: return None
+        if not found_ifvg:
+            return None
 
         current_price = float(df_ltf['close'].iloc[-1])
         fvg_mid = (fvg_high + fvg_low) / 2.0
@@ -149,7 +134,7 @@ def analyze_pair(pair_symbol):
         return {
             "df_ltf": df_ltf, "htf_high": htf_high, "htf_low": htf_low, "current_price": current_price,
             "fvg_high": fvg_high, "fvg_low": fvg_low, "fvg_mid": fvg_mid, "entry_price": entry_price,
-            "sl": sl, "tp": tp, "trade_signal": trade_signal, "chosen_tf": chosen_tf, "fvg_idx": fvg_idx
+            "sl": sl, "tp": tp, "trade_signal": trade_signal, "chosen_tf": "15m", "fvg_idx": fvg_idx
         }
     except:
         return None
@@ -214,4 +199,26 @@ if res:
         </div>
     """, unsafe_allow_html=True)
 else:
+    st.info("Ezen a páron jelenleg nincs aktív, szabályos iFVG szerkezet.")
+
+# --- AUTOMATA PIACSZKENNER MODUL ---
+st.markdown("---")
+st.subheader("🕵️‍♂️ Háttér Automata Szkenner (A Teljes Piacról)")
+
+if run_scanner:
+    scan_placeholder = st.empty()
+    active_signals = []
+    
+    for pair in filtered_symbols[:40]:
+        scan_placeholder.text(f"Háttérszűrés folyamatban... Ellenőrzés: {pair}")
+        s_res = analyze_pair(pair)
+        if s_res and "VÁRAKOZÁS" not in s_res["trade_signal"]:
+            active_signals.append(pair)
+            
+    scan_placeholder.empty()
+    
+    if active_signals:
+        st.success(f"Aktív szignált találtam ezeken a párokon: {', '.join(active_signals)}")
+    else:
+        st.info("Jelenleg nincs egyidejű aktív visszateszt szignál a vizsgált tartományban.")
 
