@@ -4,22 +4,20 @@ import pandas as pd
 import ccxt
 import plotly.graph_objects as go
 
-# Ultramodern, letisztult UI konfiguráció
+# Végleges, letisztult, helytakarékos dizájn
 st.set_page_config(page_title="ALGO ICT PRO", layout="wide", initial_sidebar_state="collapsed")
 
-# Modern dizájn injektálása: sötét tónusok, minimalizmus, neon kék részletek
 st.markdown("""
     <style>
-    .main { background-color: #080b10; color: #e2e8f0; }
-    h1 { font-family: 'Inter', sans-serif; font-size: 26px !important; font-weight: 800 !important; color: #00b0ff !important; letter-spacing: -0.5px; margin-bottom: 5px !important; }
+    .main { background-color: #080b10 !important; color: #e2e8f0 !important; }
+    h1 { font-family: 'Inter', sans-serif !important; font-size: 24px !important; font-weight: 800 !important; color: #00b0ff !important; margin-bottom: 2px !important; }
     div[data-testid="stExpander"] { background-color: #111622 !important; border: 1px solid #1e293b !important; border-radius: 8px !important; }
-    .stProgress > div > div > div > div { background-image: linear-gradient(to right, #00b0ff, #00e676) !important; }
-    div[data-testid="stNotification"] { background-color: #111622 !important; border: 1px solid #1e293b !important; border-radius: 8px !important; color: #94a3b8 !important; }
-    div.block-container { padding-top: 1.5rem !important; padding-bottom: 1rem !important; }
+    div.block-container { padding-top: 1rem !important; padding-bottom: 1rem !important; }
+    div[data-testid="stNotification"] { background-color: #111622 !important; border: 1px solid #1e293b !important; border-radius: 8px !important; }
     </style>
 """, unsafe_allow_code=True)
 
-# Új, letisztult, professzionális név és alcím
+# Új, rövid, professzionális fejléc
 st.title("⚡ ALGO ICT PRO")
 st.caption("Institutional Liquidity Sweep & Inversion FVG Terminal")
 
@@ -53,18 +51,20 @@ def find_latest_fvg(df):
     f_high, f_low, f_mid = 0.0, 0.0, 0.0
     for i in range(len(df)-1, 2, -1):
         if df['high'].iloc[i-2] < df['low'].iloc[i]:
-            f_high, f_low = df['low'].iloc[i], df['high'].iloc[i-2]
+            f_high = float(df['low'].iloc[i])
+            f_low = float(df['high'].iloc[i-2])
             f_mid = (f_high + f_low) / 2
             return f_high, f_low, f_mid
         elif df['low'].iloc[i-2] > df['high'].iloc[i]:
-            f_high, f_low = df['low'].iloc[i-2], df['high'].iloc[i]
+            f_high = float(df['low'].iloc[i-2])
+            f_low = float(df['high'].iloc[i])
             f_mid = (f_high + f_low) / 2
             return f_high, f_low, f_mid
     return 0.0, 0.0, 0.0
 
 def analyze_strategy(df_htf, df_15m, df_5m):
-    htf_high = df_htf['high'].max()
-    htf_low = df_htf['low'].min()
+    htf_high = float(df_htf['high'].max())
+    htf_low = float(df_htf['low'].min())
     
     df_ltf = df_15m
     timeframe_used = "15M"
@@ -75,10 +75,10 @@ def analyze_strategy(df_htf, df_15m, df_5m):
         timeframe_used = "5M"
         fvg_high, fvg_low, fvg_mid = find_latest_fvg(df_5m)
         
-    current_price = df_ltf['close'].iloc[-1]
+    current_price = float(df_ltf['close'].iloc[-1])
     df_ltf['ema20'] = df_ltf['close'].ewm(span=20, adjust=False).mean()
-    current_ema20 = df_ltf['ema20'].iloc[-1]
-    current_atr = calc_atr(df_ltf)
+    current_ema20 = float(df_ltf['ema20'].iloc[-1])
+    current_atr = float(calc_atr(df_ltf))
     
     was_sell_swept = (df_ltf['low'].min() <= htf_low) or (df_ltf['low'].iloc[-8:].min() <= htf_low)
     was_buy_swept = (df_ltf['high'].max() >= htf_high) or (df_ltf['high'].iloc[-8:].max() >= htf_high)
@@ -95,7 +95,7 @@ def analyze_strategy(df_htf, df_15m, df_5m):
         tp2 = min(htf_low, current_price - (abs(current_price - sl) * 6.0))
         return "SHORT / SELL", current_price, sl, tp1, tp2, fvg_high, fvg_low, fvg_mid, htf_high, htf_low, timeframe_used, df_ltf
         
-    return "VÁRAKOZÁS", current_price, 0, 0, 0, fvg_high, fvg_low, fvg_mid, htf_high, htf_low, timeframe_used, df_ltf
+    return "VÁRAKOZÁS", current_price, 0.0, 0.0, 0.0, fvg_high, fvg_low, fvg_mid, htf_high, htf_low, timeframe_used, df_ltf
 
 def draw_chart(df_plot, htf_high, htf_low, fvg_high, fvg_low, fvg_mid, signal, current_price, sl, tp1, tp2, tf_title):
     fig = go.Figure()
@@ -104,13 +104,14 @@ def draw_chart(df_plot, htf_high, htf_low, fvg_high, fvg_low, fvg_mid, signal, c
     fig.add_trace(go.Scatter(x=df_plot['time'], y=[htf_low]*len(df_plot), name="HTF Low", line=dict(color='#00e676', width=1.5)))
     
     if fvg_high > 0 and fvg_low > 0:
-        fig.add_trace(go.Scatter(x=[df_plot['time'].iloc, df_plot['time'].iloc[-1]], y=[fvg_high, fvg_high], line=dict(color='#ffd600', width=2), showlegend=False))
-        fig.add_trace(go.Scatter(x=[df_plot['time'].iloc, df_plot['time'].iloc[-1]], y=[fvg_low, fvg_low], line=dict(color='#ffd600', width=2), showlegend=False))
-        fig.add_trace(go.Scatter(x=[df_plot['time'].iloc, df_plot['time'].iloc[-1]], y=[fvg_mid, fvg_mid], line=dict(color='#ffd600', width=1, dash='dash'), showlegend=False))
+        fig.add_trace(go.Scatter(x=[df_plot['time'].iloc[0], df_plot['time'].iloc[-1]], y=[fvg_high, fvg_high], line=dict(color='#ffd600', width=2), showlegend=False))
+        fig.add_trace(go.Scatter(x=[df_plot['time'].iloc[0], df_plot['time'].iloc[-1]], y=[fvg_low, fvg_low], line=dict(color='#ffd600', width=2), showlegend=False))
+        fig.add_trace(go.Scatter(x=[df_plot['time'].iloc[0], df_plot['time'].iloc[-1]], y=[fvg_mid, fvg_mid], line=dict(color='#ffd600', width=1, dash='dash'), showlegend=False))
         fig.add_hrect(y0=fvg_low, y1=fvg_high, fillcolor="rgba(255, 214, 0, 0.03)", line_width=0)
         
     if signal != "VÁRAKOZÁS":
-        fig.add_trace(go.Scatter(x=df_plot['time'], y=[fvg_low if signal == "SHORT / SELL" else fvg_high]*len(df_plot), name="ENTRY", line=dict(color='#00b0ff', width=2.5)))
+        entry_line = fvg_low if signal == "SHORT / SELL" else fvg_high
+        fig.add_trace(go.Scatter(x=df_plot['time'], y=[entry_line]*len(df_plot), name="ENTRY", line=dict(color='#00b0ff', width=2.5)))
         fig.add_trace(go.Scatter(x=df_plot['time'], y=[sl]*len(df_plot), name="SL", line=dict(color='#ff1744', width=2.5)))
         fig.add_trace(go.Scatter(x=df_plot['time'], y=[tp1]*len(df_plot), name="TP1", line=dict(color='#00e676', width=2.5)))
         fig.add_trace(go.Scatter(x=df_plot['time'], y=[tp2]*len(df_plot), name="TP2", line=dict(color='#00c853', width=2.5)))
@@ -175,3 +176,8 @@ if scan_all_pairs:
                 active_trades_found += 1
                 with st.expander(f"🔥 {sym} - {signal} ({tf_used})", expanded=True):
                     draw_chart(df_active, h_h, h_l, f_h, f_l, f_m, signal, entry, sl, tp1, tp2, tf_used)
+                    show_metrics(entry, sl, tp1, tp2, total_balance, risk_percent)
+        except:
+            continue
+        progress_bar.progress((index + 1) / len(symbols_to_scan))
+    if active_trades_found == 0:
