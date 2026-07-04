@@ -4,18 +4,7 @@ import pandas as pd
 import ccxt
 import plotly.graph_objects as go
 
-# Ultramodern TradingView / LuxAlgo UI konfiguráció
 st.set_page_config(page_title="ALGO ICT PRO", layout="wide", initial_sidebar_state="collapsed")
-
-# Prémium sötét tónusok és tiszta elrendezés injektálása
-st.markdown("""
-    <style>
-    .main { background-color: #0c0d14 !important; color: #f1f5f9 !important; }
-    h1 { font-family: 'Inter', sans-serif !important; font-size: 26px !important; font-weight: 900 !important; color: #00b0ff !important; letter-spacing: -0.5px; }
-    div[data-testid="stMetricValue"] { font-size: 22px !important; font-weight: 700 !important; color: #f8fafc !important; }
-    div.block-container { padding-top: 1.5rem !important; padding-bottom: 1rem !important; }
-    </style>
-""", unsafe_allow_code=True)
 
 st.title("⚡ ALGO ICT PRO")
 st.caption("Advanced Institutional Liquidity Terminal | Powered by Bitget")
@@ -106,11 +95,9 @@ elif var_buy_swept and fvg_low > 0:
     if current_price >= entry_price * 0.995:
         trade_signal = "SHORT / SELL"
 
-# PROFESSZIONÁLIS TRADINGVIEW STÍLUSÚ GRAFIKON FELÉPÍTÉSE
 fig = go.Figure()
 fig.add_trace(go.Candlestick(x=df_15['time'], open=df_15['open'], high=df_15['high'], low=df_15['low'], close=df_15['close'], name="15M", increasing_line_color='#089981', decreasing_line_color='#f23645', increasing_fillcolor='#089981', decreasing_fillcolor='#f23645'))
 
-# Szintek berajzolása TradingView stílusú jobb oldali árcímkékkel (Price Badges)
 fig.add_trace(go.Scatter(x=df_15['time'], y=[htf_high]*len(df_15), name="HTF High", line=dict(color='rgba(0, 230, 118, 0.4)', width=1, dash='dash')))
 fig.add_trace(go.Scatter(x=df_15['time'], y=[htf_low]*len(df_15), name="HTF Low", line=dict(color='rgba(0, 230, 118, 0.4)', width=1, dash='dash')))
 
@@ -119,7 +106,6 @@ if fvg_high > 0 and fvg_low > 0:
     fig.add_trace(go.Scatter(x=[df_15['time'].iloc[0], df_15['time'].iloc[-1]], y=[fvg_low, fvg_low], line=dict(color='#ffd600', width=1.5), showlegend=False))
     fig.add_hrect(y0=fvg_low, y1=fvg_high, fillcolor="rgba(255, 214, 0, 0.02)", line_width=0)
 
-# Éles szintek feliratozva az ársávon
 fig.add_trace(go.Scatter(x=df_15['time'], y=[entry_price]*len(df_15), name="ENTRY", line=dict(color='#00b0ff', width=2)))
 fig.add_trace(go.Scatter(x=df_15['time'], y=[sl]*len(df_15), name="SL", line=dict(color='#ff1744', width=2)))
 fig.add_trace(go.Scatter(x=df_15['time'], y=[tp1]*len(df_15), name="TP1", line=dict(color='#00e676', width=2)))
@@ -129,22 +115,12 @@ buffer = (df_15['high'].max() - df_15['low'].min()) * 0.15
 y_min = min(df_15['low'].min(), htf_low, sl) - buffer
 y_max = max(df_15['high'].max(), htf_high, sl) + buffer
 
-# LuxAlgo ihlette sötét, tiszta rács elrendezés ársávval a jobb oldalon
 fig.update_layout(
     template="plotly_dark",
-    paper_bgcolor="#0c0d14",
-    plot_bgcolor="#0c0d14",
     xaxis_rangeslider_visible=False,
     height=480,
     margin=dict(l=10, r=65, t=10, b=10),
-    yaxis=dict(
-        range=[y_min, y_max], 
-        fixedrange=False, 
-        side="right", 
-        gridcolor="#1e293b", 
-        zeroline=False,
-        tickfont=dict(size=11, color="#64748b")
-    ),
+    yaxis=dict(range=[y_min, y_max], fixedrange=False, side="right", gridcolor="#1e293b", zeroline=False, tickfont=dict(size=11, color="#64748b")),
     xaxis=dict(gridcolor="#1e293b", zeroline=False, tickfont=dict(color="#64748b")),
     showlegend=False
 )
