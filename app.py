@@ -1,4 +1,4 @@
-# Kesz_Alkalmazas_Vegleges_Es_Hibatlan
+# Kesz_Alkalmazas_Vegleges_Es_Biztos
 import streamlit as st
 import pandas as pd
 import ccxt
@@ -73,7 +73,6 @@ filtered_symbols = get_active_markets()
 
 def analyze_pair(pair_symbol):
     try:
-        # String tisztítás a Futures formátumokhoz
         clean_symbol = pair_symbol.split(':')[0] if ':' in pair_symbol else pair_symbol
 
         # 1. HTF szintek lekérése
@@ -171,11 +170,10 @@ if run_scanner:
 
     scan_placeholder.empty()
 
-    # Kirajzolási fázis egymás alá
+    # Kirajzolási fázis teljesen tiszta, fix struktúrával
     if active_signals:
         for idx, (pair, res) in enumerate(active_signals):
             df_ltf = res["df_ltf"]
-            t_array = df_ltf['time']
             
             # A) FEJLÉC KÁRTYA
             clean_display_name = pair.split(':')[0] if ':' in pair else pair
@@ -185,25 +183,30 @@ if run_scanner:
                 </div>
             """, unsafe_allow_html=True)
             
-            # B) TRADINGVIEW STÍLUSÚ GRAFIKON (HAJSZÁLPONTOS, JAVÍTOTT ZÁRÓJEL SZERKEZETTEL)
+            # B) TRADINGVIEW STÍLUSÚ GRAFIKON (PONTOS, HIBÁTLAN HLINE MEGOLDÁSSAL)
             fig = go.Figure()
             
             fig.add_trace(go.Candlestick(
-                x=t_array, open=df_ltf['open'], high=df_ltf['high'], low=df_ltf['low'], close=df_ltf['close'],
+                x=df_ltf['time'], open=df_ltf['open'], high=df_ltf['high'], low=df_ltf['low'], close=df_ltf['close'],
                 increasing_line_color='#089981', decreasing_line_color='#f23645',
                 increasing_fillcolor='#089981', decreasing_fillcolor='#f23645', name="Ár"
             ))
             
-            # JAVÍTÁS: Zárójel-szorzás hiba teljesen kiküszöbölve sima tömbbé alakítással
-            fig.add_trace(go.Scatter(x=t_array, y=[res["htf_high"] for _ in range(len(df_ltf))], name="HTF Liq High", line=dict(color='#26a69a', width=2)))
-            fig.add_trace(go.Scatter(x=t_array, y=[res["htf_low"] for _ in range(len(df_ltf))], name="HTF Liq Low", line=dict(color='#ef5350', width=2)))
+            # JAVÍTÁS: A go.Scatter szorzások helyett stabil, natív beépített Plotly hline-okat használunk!
+            fig.add_hline(y=res["htf_high"], line_color="#26a69a", line_width=2, name="HTF Liq High")
+            fig.add_hline(y=res["htf_low"], line_color="#ef5350", line_width=2, name="HTF Liq Low")
+            
+            fig.add_hline(y=res["entry_price"], line_color="#29b6f6", line_width=2, name="Belépő")
+            fig.add_hline(y=res["sl"], line_color="#ff1744", line_width=1.5, line_dash="dash", name="SL")
+            fig.add_hline(y=res["tp"], line_color="#00e676", line_width=1.5, name="TP")
 
+            # FVG téglalap és a lila szaggatott CE középvonal kirajzolása
             if res["fvg_high"] > 0 and res["fvg_start_idx"] is not None:
                 s_idx = int(res["fvg_start_idx"])
                 e_idx = int(min(s_idx + 12, len(df_ltf) - 1))
                 
-                t_start = t_array.iloc[s_idx]
-                t_end = t_array.iloc[e_idx]
+                t_start = df_ltf['time'].iloc[s_idx]
+                t_end = df_ltf['time'].iloc[e_idx]
                 
                 bx = [t_start, t_end, t_end, t_start, t_start]
                 by = [res["fvg_high"], res["fvg_high"], res["fvg_low"], res["fvg_low"], res["fvg_high"]]
@@ -211,12 +214,11 @@ if run_scanner:
                 fig.add_trace(go.Scatter(x=bx, y=by, fill="toself", fillcolor="rgba(255, 214, 0, 0.06)", line=dict(color='#ffd600', width=1.5), showlegend=False))
                 fig.add_trace(go.Scatter(x=[t_start, t_end], y=[res["fvg_mid"], res["fvg_mid"]], line=dict(color='#e040fb', width=2, dash='dash'), name="CE 50%"))
 
-            fig.add_trace(go.Scatter(x=t_array, y=[res["entry_price"] for _ in range(len(df_ltf))], name="Belépő", line=dict(color='#29b6f6', width=2)))
-            fig.add_trace(go.Scatter(x=t_array, y=[res["sl"] for _ in range(len(df_ltf))], name="SL", line=dict(color='#ff1744', width=1.5, dash='dash')))
-            fig.add_trace(go.Scatter(x=t_array, y=[res["tp"] for _ in range(len(df_ltf))], name="TP", line=dict(color='#00e676', width=1.5)))
-
             y_pad = (max(df_ltf['high'].max(), res["htf_high"]) - min(df_ltf['low'].min(), res["htf_low"])) * 0.1
             y_min = min(df_ltf['low'].min(), res["htf_low"], res["tp"]) - y_pad
             y_max = max(df_ltf['high'].max(), res["htf_high"], res["tp"]) + y_pad
 
             fig.update_layout(
+                template="plotly_dark", xaxis_rangeslider_visible=False, height=400,
+                paper_bgcolor='#131722', plot_bgcolor='#131722', margin=dict(l=10, r=55, t=10, b=10),
+                showlegend=False,
