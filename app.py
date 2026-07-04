@@ -20,11 +20,12 @@ with col_kock:
 
 @st.cache_data(ttl=30)
 def get_crypto_data(exch):
+    # Javított lekérdezés a legújabb TradingView API szabvány szerint (.get())
     q = (Query()
          .set_markets('crypto')
          .where(col('exchange') == exch)
          .select('name', 'close', 'volume', 'high', 'low', 'high|1h', 'low|1h', 'EMA20', 'ATR', 'RSI'))
-    return q.get_results()
+    return q.get()
 
 try:
     df = get_crypto_data(exchange)
@@ -37,7 +38,7 @@ try:
     selected_pair = st.selectbox("🎯 Válassz kriptopárt:", pairs if pairs else ["Nincs elérhető adat"])
 
     if selected_pair and pairs:
-        coin = df[df['name'] == selected_pair].iloc
+        coin = df[df['name'] == selected_pair].iloc[0]
         price = float(coin['close'])
         ltf_high, ltf_low = float(coin['high']), float(coin['low'])
         htf_high, htf_low = float(coin['high|1h']), float(coin['low|1h'])
@@ -54,7 +55,7 @@ try:
             trade_signal = "SHORT / SELL"
             entry = price
             sl = htf_high + (0.2 * atr)
-            tp = ltf_low
+            tp = htf_low
 
         c1, c2, c3 = st.columns(3)
         c1.metric("Aktuális Ár", f"${price:,.4f}")
@@ -81,4 +82,11 @@ try:
             st.info("⏳ Nincs aktív sweep. Várunk a likviditás kiszedésére.")
 except Exception as e:
     st.error(f"Hiba: {e}")
+
+
+
+    
+            
+
+        
   
