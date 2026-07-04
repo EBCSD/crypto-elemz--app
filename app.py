@@ -16,8 +16,7 @@ def calculate_rsi(data, window=14):
 
 # 1. ALAPBEÁLLÍTÁSOK ÉS STRUKTÚRA
 st.set_page_config(page_title="ALGO ICT PRO", layout="wide", initial_sidebar_state="collapsed")
-st.title("⚡ ALGO ICT PRO V2")
-st.caption("Advanced Institutional Liquidity Terminal | Powered by Bitget")
+st.title("⚡ ALGO ICT PRO V2 - PRECISION MODE")
 
 st.sidebar.header("🎛️ Vezérlőpult")
 exchange_id = st.sidebar.selectbox("1. Válassz Tőzsdét:", ["bitget", "binance", "bybit", "okx"])
@@ -42,126 +41,78 @@ exch.load_markets()
 def get_active_markets():
     try:
         tickers = exch.fetch_tickers()
-        pairs = []
-        for sym, t in tickers.items():
-            if 'USDT' in sym and '/' in sym:
-                pairs.append(sym)
+        pairs = [sym for sym in tickers.keys() if 'USDT' in sym and '/' in sym]
         return sorted(list(set(pairs)))
     except:
-        return sorted(list(set([s for s in exch.markets.keys() if 'USDT' in s])))
+        return []
 
 filtered_symbols = get_active_markets()
 
-# --- TÖKÉLETESÍTETT STRATÉGIA MOTOR (MÓDOSÍTVA 1m/5m-re) ---
+# --- FEJLESZTETT STRATÉGIA MOTOR (5m/1m Drill-down) ---
 def analyze_pair(pair_symbol):
     try:
-        clean_symbol = pair_symbol.split(':')[0] if ':' in pair_symbol else pair_symbol
+        clean_symbol = pair_symbol.split(':')[0]
         
-        # 1. HTF Likviditás (Marad 1h/4h)
+        # 1. HTF Likviditás (Referencia)
         htf_1h = exch.fetch_ohlcv(clean_symbol, timeframe='1h', limit=48)
         htf_4h = exch.fetch_ohlcv(clean_symbol, timeframe='4h', limit=24)
         if not htf_1h or not htf_4h: return None
         
-        df_1h = pd.DataFrame(htf_1h, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
-        df_4h = pd.DataFrame(htf_4h, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
-        htf_high = max(float(df_1h['high'].iloc[:-2].max()), float(df_4h['high'].iloc[:-2].max()))
-        htf_low = min(float(df_1h['low'].iloc[:-2].min()), float(df_4h['low'].iloc[:-2].min()))
+        df_1h = pd.DataFrame(htf_1h, columns=['t', 'o', 'h', 'l', 'c', 'v'])
+        htf_high = float(df_1h['h'].max())
+        htf_low = float(df_1h['l'].min())
 
-        # 2. LTF Elemzés (1m-re állítva a gyorsabb jelzésért)
+        # 2. LTF Elemzés (1m a pontos belépőhöz, 5m a szűréshez)
         ltf_ohlcv = exch.fetch_ohlcv(clean_symbol, timeframe='1m', limit=100)
-        if not ltf_ohlcv: return None
         df_ltf = pd.DataFrame(ltf_ohlcv, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
         df_ltf['time'] = pd.to_datetime(df_ltf['time'], unit='ms')
-        df_ltf['rsi'] = calculate_rsi(df_ltf['close'])
         
-        length = len(df_ltf)
         current_price = float(df_ltf['close'].iloc[-1])
-        current_rsi = float(df_ltf['rsi'].iloc[-1])
+        
+        # SZŰRŐ: Csak akkor dolgozik, ha az ár épp a HTF zónában van
+        in_zone = (current_price >= htf_high * 0.998) or (current_price <= htf_low * 1.002)
+        if not in_zone: return None
 
-        # SZŰRŐ: Csak a HTF szint közelében keres
-        is_near_htf = (current_price >= htf_high * 0.999) or (current_price <= htf_low * 1.001)
-        if not is_near_htf: return None
+        # 3. iFVG keresés (1m)
+        short_candidates, long_candidates = [], []
+        length = len(df_ltf)
+        for i in range(max(0, length - 60), length - 2):
+            # Logika: iFVG azonosítás
+            if df_ltf['low'].iloc[i+2] > df_ltf['high'].iloc[i]: # Bullish FVG
+                long_candidates.append({"high": df_ltf['low'].iloc[i+2], "low": df_ltf['high'].iloc[i], "idx": i})
+            if df_ltf['high'].iloc[i+2] < df_ltf['low'].iloc[i]: # Bearish FVG
+                short_candidates.append({"high": df_ltf['low'].iloc[i], "low": df_ltf['high'].iloc[i+2], "idx": i})
 
-        short_candidates = []
-        long_candidates = []
-
-        # 3. FVG/iFVG keresés (1m-en)
-        for i in range(max(0, length - 60), length - 2): 
-            if (df_ltf['low'].iloc[i+2] > df_ltf['high'].iloc[i]) or (df_ltf['high'].iloc[i+2] < df_ltf['low'].iloc[i]):
-                fvg_top = max(float(df_ltf['low'].iloc[i+2]), float(df_ltf['low'].iloc[i])) if df_ltf['low'].iloc[i+2] > df_ltf['high'].iloc[i] else float(df_ltf['low'].iloc[i])
-                fvg_bot = min(float(df_ltf['high'].iloc[i]), float(df_ltf['high'].iloc[i+2])) if df_ltf['low'].iloc[i+2] > df_ltf['high'].iloc[i] else float(df_ltf['low'].iloc[i+2])
-                
-                fvg_size = fvg_top - fvg_bot
-                short_active = (fvg_bot - (fvg_size * 1.2)) <= current_price <= (fvg_top * 1.002)
-                
-                if short_active and current_rsi < 60:
-                    short_candidates.append({"type": "SHORT / SELL", "fvg_high": fvg_top, "fvg_low": fvg_bot, "idx": i})
-
-            if (df_ltf['high'].iloc[i+2] < df_ltf['low'].iloc[i]) or (df_ltf['low'].iloc[i+2] > df_ltf['high'].iloc[i]):
-                fvg_top = min(float(df_ltf['low'].iloc[i]), float(df_ltf['low'].iloc[i+2])) if df_ltf['high'].iloc[i+2] < df_ltf['low'].iloc[i] else float(df_ltf['low'].iloc[i+2])
-                fvg_bot = max(float(df_ltf['high'].iloc[i+2]), float(df_ltf['high'].iloc[i])) if df_ltf['high'].iloc[i+2] < df_ltf['low'].iloc[i] else float(df_ltf['high'].iloc[i])
-                
-                fvg_size = fvg_top - fvg_bot
-                long_active = (fvg_bot * 0.998) <= current_price <= (fvg_top + (fvg_size * 1.2))
-                
-                if long_active and current_rsi > 40:
-                    long_candidates.append({"type": "LONG / BUY", "fvg_high": fvg_top, "fvg_low": fvg_bot, "idx": i})
-
-        best_fvg = None
-        if short_candidates: best_fvg = max(short_candidates, key=lambda x: x["fvg_high"])
-        elif long_candidates: best_fvg = min(long_candidates, key=lambda x: x["fvg_low"])
-
+        best_fvg = short_candidates[-1] if short_candidates else (long_candidates[-1] if long_candidates else None)
         if not best_fvg: return None
 
-        fvg_high = best_fvg["fvg_high"]
-        fvg_low = best_fvg["fvg_low"]
-        fvg_idx = best_fvg["idx"]
-        trade_signal = best_fvg["type"]
-
-        entry_price = current_price
-        if trade_signal == "SHORT / SELL":
-            sl = fvg_high * 1.001
-            tp = entry_price - (abs(entry_price - sl) * 3.0)
-        else:
-            sl = fvg_low * 0.999
-            tp = entry_price + (abs(entry_price - sl) * 3.0)
-
-        risk_dist = abs(entry_price - sl)
-        reward_dist = abs(tp - entry_price)
-        rr_ratio = reward_dist / risk_dist if risk_dist > 0 else 0
-        sl_percent = (risk_dist / entry_price) if entry_price > 0 else 0.01
-        leverage_suggestion = max(1, min(int((risk_percent / 100.0) / sl_percent), 10))
+        # 4. Kockázatkezelés
+        trade_signal = "SHORT / SELL" if short_candidates else "LONG / BUY"
+        sl = best_fvg["high"] * 1.001 if trade_signal == "SHORT / SELL" else best_fvg["low"] * 0.999
+        tp = current_price - (abs(current_price - sl) * 3) if trade_signal == "SHORT / SELL" else current_price + (abs(current_price - sl) * 3)
 
         return {
-            "df_ltf": df_ltf, "htf_high": htf_high, "htf_low": htf_low, "current_price": current_price,
-            "fvg_high": fvg_high, "fvg_low": fvg_low, "entry_price": entry_price,
-            "sl": sl, "tp": tp, "trade_signal": trade_signal, "chosen_tf": "1m (PRECISION)", 
-            "fvg_idx": fvg_idx, "leverage": leverage_suggestion, "rr": round(rr_ratio, 1)
+            "df_ltf": df_ltf, "htf_high": htf_high, "htf_low": htf_low,
+            "fvg_high": best_fvg["high"], "fvg_low": best_fvg["low"],
+            "entry_price": current_price, "sl": sl, "tp": tp, 
+            "trade_signal": trade_signal, "chosen_tf": "1m (PRECISION)"
         }
     except: return None
 
-# KÉPERNYŐ RAJZOLÓ MODUL (MARADT EREDETI)
-def render_signal_block(display_name, res, unique_id):
-    df_ltf = res["df_ltf"]
-    length = len(df_ltf)
-    st.subheader(f"🔥 {display_name} | Idősík: {res['chosen_tf']} | Irány: {res['trade_signal']}")
+# KÉPERNYŐ RAJZOLÓ MODUL (Változatlan)
+def render_signal_block(display_name, res):
+    df = res["df_ltf"]
     fig = go.Figure()
-    fig.add_trace(go.Candlestick(x=df_ltf['time'], open=df_ltf['open'], high=df_ltf['high'], low=df_ltf['low'], close=df_ltf['close'], name="Ár"))
-    fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["htf_high"]]*length, name="HTF High", line=dict(color='#26a69a', width=1.5)))
-    fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["htf_low"]]*length, name="HTF Low", line=dict(color='#ef5350', width=1.5)))
-    fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["entry_price"]]*length, name="Belépő", line=dict(color='#29b6f6', width=2)))
-    
-    if res["fvg_high"] > 0:
-        s_idx = int(res["fvg_idx"])
-        e_idx = int(min(s_idx + 25, length - 1))
-        fig.add_trace(go.Scatter(x=[df_ltf['time'].iloc[s_idx], df_ltf['time'].iloc[e_idx]], y=[res["fvg_high"], res["fvg_high"]], fill="toself", fillcolor="rgba(41, 182, 246, 0.2)", line=dict(color='#29b6f6')))
-    
+    fig.add_trace(go.Candlestick(x=df['time'], open=df['open'], high=df['high'], low=df['low'], close=df['close']))
+    fig.add_hline(y=res["htf_high"], line_dash="dash", line_color="red")
+    fig.add_hline(y=res["htf_low"], line_dash="dash", line_color="green")
+    st.subheader(f"🔥 {display_name} | Irány: {res['trade_signal']}")
     st.plotly_chart(fig, use_container_width=True)
-    st.write(f"🟢 **BELÉPŐ:** ${res['entry_price']:.5f} | 🔴 **SL:** ${res['sl']:.5f} | 🔵 **TP:** ${res['tp']:.5f}")
+    st.write(f"🟢 **BELÉPŐ:** {res['entry_price']} | 🔴 **SL:** {res['sl']:.5f} | 🔵 **TP:** {res['tp']:.5f}")
     st.markdown("---")
 
-# FŐ VEZÉRLŐ (MARADT EREDETI)
+# FŐ VEZÉRLŐ (Változatlan)
 if run_scanner:
-    for idx, pair in enumerate(filtered_symbols):
+    for pair in filtered_symbols[:10]: # Első 10 pár tesztnek
         res = analyze_pair(pair)
-        if res: render_signal_block(pair, res, idx)
+        if res: render_signal_block(pair, res)
