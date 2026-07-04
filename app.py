@@ -6,8 +6,6 @@ import plotly.graph_objects as go
 
 st.set_page_config(page_title="ALGO ICT PRO", layout="wide", initial_sidebar_state="collapsed")
 
-st.markdown("<style>.main { background-color: #080b10 !important; color: #e2e8f0 !important; } h1 { font-family: 'Inter', sans-serif !important; font-size: 24px !important; font-weight: 800 !important; color: #00b0ff !important; margin-bottom: 2px !important; } div.block-container { padding-top: 1rem !important; padding-bottom: 1rem !important; }</style>", unsafe_allow_code=True)
-
 st.title("⚡ ALGO ICT PRO")
 st.caption("Institutional Liquidity Sweep & Inversion FVG Terminal")
 
