@@ -1,4 +1,4 @@
-# Kesz_Alkalmazas
+          # Kesz_Alkalmazas
 import streamlit as st
 import pandas as pd
 import ccxt
@@ -42,7 +42,6 @@ def analyze_strategy(df_htf, df_ltf):
     current_ema20 = df_ltf['ema20'].iloc[-1]
     current_atr = calc_atr(df_ltf)
     
-    # JAVÍTOTT LONG ÉS SHORT DETEKTÁLÁS (A kanócokat is vizsgálja az elmúlt időszakban)
     was_sell_swept = (df_ltf['low'].min() <= htf_low) or (df_ltf['low'].iloc[-5:].min() <= htf_low)
     was_buy_swept = (df_ltf['high'].max() >= htf_high) or (df_ltf['high'].iloc[-5:].max() >= htf_high)
     
@@ -111,61 +110,66 @@ def show_metrics(entry, sl, tp1, tp2, bal, risk):
     cc2.metric("Megnyitandó méret", f"${pos_size:,.2f}")
     cc3.metric("Szükséges Margin", f"${margin:,.2f}")
 
-try:
-    exch = init_exchange(exchange_id)
-    with st.spinner("Piacok szinkronizálása..."):
-        exch.load_markets()
-    all_symbols = list(exch.markets.keys())
+exch = init_exchange(exchange_id)
+exch.load_markets()
+all_symbols = list(exch.markets.keys())
+
+if market_type == "Futures":
+    filtered_symbols = [s for s in all_symbols if exch.markets[s].get('linear') or ('USDT' in s and ':' in s)]
+elif market_type == "Margin":
+    filtered_symbols = [s for s in all_symbols if exch.markets[s].get('margin')]
+else:
+    filtered_symbols = [s for s in all_symbols if exch.markets[s].get('spot')]
+
+if scan_all_pairs:
+    st.markdown("### ⚡ **Élő ICT Piacszűrő futása...**")
+    active_trades_found = 0
+    symbols_to_scan = filtered_symbols[:25]
+    progress_bar = st.progress(0)
     
-    if market_type == "Futures":
-        filtered_symbols = [s for s in all_symbols if exch.markets[s].get('linear') or ('USDT' in s and ':' in s)]
-    elif market_type == "Margin":
-        filtered_symbols = [s for s in all_symbols if exch.markets[s].get('margin')]
-    else:
-        filtered_symbols = [s for s in all_symbols if exch.markets[s].get('spot')]
-
-    if scan_all_pairs:
-        st.markdown("### ⚡ **Élő ICT Piacszűrő futása...**")
-        active_trades_found = 0
-        symbols_to_scan = filtered_symbols[:25]
-        progress_bar = st.progress(0)
+    for index, sym in enumerate(symbols_to_scan):
+        try:
+            htf = exch.fetch_ohlcv(sym, timeframe='1h', limit=48)
+            ltf = exch.fetch_ohlcv(sym, timeframe='15m', limit=40)
+            if len(htf) < 10 or len(ltf) < 10: continue
+            df_h = pd.DataFrame(htf, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
+            df_l = pd.DataFrame(ltf, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
+            df_l['time'] = pd.to_datetime(df_l['time'], unit='ms')
+            
+            signal, entry, sl, tp1, tp2, f_h, f_l, f_m, h_h, h_l = analyze_strategy(df_h, df_l)
+            
+            if signal != "VÁRAKOZÁS":
+                active_trades_found += 1
+                with st.expander(f"🔥 {sym} - JELZÉS: {signal}", expanded=True):
+                    draw_chart(df_l, h_h, h_l, f_h, f_l, f_m, signal, entry, sl, tp1, tp2)
+                    show_metrics(entry, sl, tp1, tp2, total_balance, risk_percent)
+        except:
+            continue
+        progress_bar.progress((index + 1) / len(symbols_to_scan))
         
-        for index, sym in enumerate(symbols_to_scan):
-            try:
-                htf = exch.fetch_ohlcv(sym, timeframe='1h', limit=48)
-                ltf = exch.fetch_ohlcv(sym, timeframe='15m', limit=40)
-                if len(htf) < 10 or len(ltf) < 10: continue
-                df_h = pd.DataFrame(htf, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
-                df_l = pd.DataFrame(ltf, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
-                df_l['time'] = pd.to_datetime(df_l['time'], unit='ms')
-                
-                signal, entry, sl, tp1, tp2, f_h, f_l, f_m, h_h, h_l = analyze_strategy(df_h, df_l)
-                
-                if signal != "VÁRAKOZÁS":
-                    active_trades_found += 1
-                    with st.expander(f"🔥 {sym} - JELZÉS: {signal}", expanded=True):
-                        # Grafikon kirajzolása közvetlenül az automata kártya belsejébe!
-                        draw_chart(df_l, h_h, h_l, f_h, f_l, f_m, signal, entry, sl, tp1, tp2)
-                        show_metrics(entry, sl, tp1, tp2, total_balance, risk_percent)
-            except:
-                continue
-            progress_bar.progress((index + 1) / len(symbols_to_scan))
-            
-        if active_trades_found == 0:
-            st.info("⏳ Inaktivitás. Jelenleg egyetlen páron sincs aktív setup. Próbálj piacot vagy tőzsdét váltani.")
-            
-    else:
-        selected_pair = st.selectbox("2. Válassz ki egy kriptopárt az elemzéshez:", filtered_symbols if filtered_symbols else ["Nincs adat"])
-        if selected_pair and selected_pair != "Nincs adat":
-            st.markdown(f"### 🔍 **{selected_pair.upper()}** Részletes ICT Elemzése...")
-            with st.spinner("Adatok letöltése..."):
-                htf_ohlcv = exch.fetch_ohlcv(selected_pair, timeframe='1h', limit=48)
-                df_htf = pd.DataFrame(htf_ohlcv, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
-                ltf_ohlcv = exch.fetch_ohlcv(selected_pair, timeframe='15m', limit=40)
-                df_ltf = pd.DataFrame(ltf_ohlcv, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
-                df_ltf['time'] = pd.to_datetime(df_ltf['time'], unit='ms')
+    if active_trades_found == 0:
+        st.info("⏳ Inaktivitás. Egyetlen páron sincs aktív setup. Próbálj piacot vagy tőzsdét váltani.")
+        
+else:
+    selected_pair = st.selectbox("2. Válassz ki egy kriptopárt az elemzéshez:", filtered_symbols if filtered_symbols else ["Nincs adat"])
+    if selected_pair and selected_pair != "Nincs adat":
+        st.markdown(f"### 🔍 **{selected_pair.upper()}** Részletes ICT Elemzése...")
+        htf_ohlcv = exch.fetch_ohlcv(selected_pair, timeframe='1h', limit=48)
+        df_htf = pd.DataFrame(htf_ohlcv, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
+        ltf_ohlcv = exch.fetch_ohlcv(selected_pair, timeframe='15m', limit=40)
+        df_ltf = pd.DataFrame(ltf_ohlcv, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
+        df_ltf['time'] = pd.to_datetime(df_ltf['time'], unit='ms')
 
-            signal, entry_price, stop_loss, take_profit_1, take_profit_2, fvg_high, fvg_low, fvg_mid, htf_high, htf_low = analyze_strategy(df_htf, df_ltf)
-            draw_chart(df_ltf, htf_high, htf_low, fvg_high, fvg_low, fvg_mid, signal, entry_price, stop_loss, take_profit_1, take_profit_2)
-            
-            st.markdown("---")
+        signal, entry_price, stop_loss, take_profit_1, take_profit_2, fvg_high, fvg_low, fvg_mid, htf_high, htf_low = analyze_strategy(df_htf, df_ltf)
+        draw_chart(df_ltf, htf_high, htf_low, fvg_high, fvg_low, fvg_mid, signal, entry_price, stop_loss, take_profit_1, take_profit_2)
+        
+        st.markdown("---")
+        st.subheader("🎯 Automatizált Kereskedési Javaslat")
+        if signal != "VÁRAKOZÁS":
+            if signal == "LONG / BUY": st.success(f"🔥 **JELZÉS:** {signal}")
+            else: st.error(f"🔥 **JELZÉS:** {signal}")
+            st.write(f"ℹ️ **Piaci logikád megerősítése:** Kialakult az Inverse FVG zóna, az árfolyam a kritikus szinten túl zárt be!")
+            show_metrics(entry_price, stop_loss, take_profit_1, take_profit_2, total_balance, risk_percent)
+        else:
+            st.info(f"⏳ **RENDSZER STÁTUSZ:** {signal}")
+  
