@@ -4,32 +4,8 @@ import ccxt
 import plotly.graph_objects as go
 import time
 
-# 1. OLDALBEÁLLÍTÁSOK ÉS TRADINGVIEW DESIGN - SZIGORÚAN JAVÍTVA ÉS TESZTELVE
+# 1. ALAPBEÁLLÍTÁSOK (A Problémás stílusblokk teljesen törölve)
 st.set_page_config(page_title="ALGO ICT PRO", layout="wide", initial_sidebar_state="collapsed")
-
-st.markdown("""
-    <style>
-    .block-container { padding-top: 1rem; padding-bottom: 1rem; background-color: #131722; }
-    h1, h2, h3, p, span, caption { color: #d1d4dc !important; }
-    div[data-testid="stVerticalBlock"] { background-color: #131722; }
-    .signal-header { 
-        background-color: #1c2030; 
-        padding: 12px; 
-        border-radius: 6px; 
-        border-left: 5px solid #ffd600;
-        margin-top: 25px;
-        margin-bottom: 15px; 
-    }
-    .data-row {
-        background-color: #1c2030;
-        padding: 15px;
-        border-radius: 6px;
-        border: 1px solid #2a2e39;
-        margin-top: 5px;
-        margin-bottom: 30px;
-    }
-    </style>
-""", unsafe_allow_html=True)
 
 st.title("⚡ ALGO ICT PRO V2")
 st.caption("Advanced Institutional Liquidity Terminal | Powered by Bitget")
@@ -170,16 +146,12 @@ def analyze_pair(pair_symbol):
     except:
         return None
 
-# KÉPERNYŐ RAJZOLÓ MODUL
+# KÉPERNYŐ RAJZOLÓ MODUL (Tiszta Streamlit elemekkel)
 def render_signal_block(display_name, res, unique_id):
     df_ltf = res["df_ltf"]
     length = len(df_ltf)
     
-    st.markdown(f"""
-        <div class="signal-header">
-            <h3 style='margin:0; font-size:16px;'>🔥 {display_name} &nbsp;|&nbsp; Idősík: {res['chosen_tf']} &nbsp;|&nbsp; Irány: {res['trade_signal']}</h3>
-        </div>
-    """, unsafe_allow_html=True)
+    st.subheader(f"🔥 {display_name} | Idősík: {res['chosen_tf']} | Irány: {res['trade_signal']}")
 
     fig = go.Figure()
     fig.add_trace(go.Candlestick(
@@ -218,4 +190,20 @@ def render_signal_block(display_name, res, unique_id):
     )
     st.plotly_chart(fig, use_container_width=True, key=f"chart_render_{unique_id}")
     
-    st.markdown(f"""
+    st.write(f"🟢 **BESZÁLÓ ÁR (CE 50%):** ${res['entry_price']:.5f}")
+    st.write(f"🔴 **STOP LOSS ÁR (SL):</b> ${res['sl']:.5f}")
+    st.write(f"🔵 **TAKE PROFIT ÁR (TP):</b> ${res['tp']:.5f}")
+    st.write(f"⚙️ **JAVASOLT TŐKEÁTTÉTEL:** {res['leverage']}x (Max 10x)")
+    st.write(f"📊 **R:R ARÁNY / AKTUÁLIS ÁR:** 1:{res['rr']} | ${res['current_price']:.5f}")
+    st.markdown("---")
+
+# --- FŐ VEZÉRLŐ LOGIKA ---
+if not run_scanner:
+    st.subheader("🎯 Kézi Elemzés és Egyedi Keresés")
+    lumia_index = filtered_symbols.index("LUMIA/USDT") if "LUMIA/USDT" in filtered_symbols else 0
+    selected_pair = st.selectbox("Válassz ki egy konkrét párt az azonnali elemzéshez:", filtered_symbols, index=lumia_index)
+    
+    manual_res = analyze_pair(selected_pair)
+    if manual_res:
+        render_signal_block(selected_pair, manual_res, "manual_mode")
+    else:
