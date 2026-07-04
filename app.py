@@ -67,9 +67,9 @@ filtered_symbols = get_active_markets()
 # HAJSZÁLPONTOS INVERZ FVG STRATÉGIAI MOTOR
 def analyze_pair(pair_symbol):
     try:
-        clean_symbol = pair_symbol.split(':')[0] if ':' in pair_symbol else pair_symbol
+        clean_symbol = pair_symbol.split(':') if ':' in pair_symbol else pair_symbol
 
-        # HTF lekérése
+        # HTF lekérése (1h és 4h kombinált likviditás)
         htf_1h = exch.fetch_ohlcv(clean_symbol, timeframe='1h', limit=48)
         htf_4h = exch.fetch_ohlcv(clean_symbol, timeframe='4h', limit=24)
         if not htf_1h or not htf_4h: return None
@@ -138,20 +138,20 @@ def analyze_pair(pair_symbol):
         entry_price = fvg_mid
         sl = htf_high if fvg_type == "BEARISH_INVERSE" else htf_low
         
-        # Dinamikus célár számítás fix 1:3.5 RR-el (Ami garantáltan nagyobb mint a kért 1:3)
+        # Célár számítás fix 1:3.5 RR aránnyal
         tp = entry_price - (abs(entry_price - sl) * 3.5) if fvg_type == "BEARISH_INVERSE" else entry_price + (abs(entry_price - sl) * 3.5)
 
-        # SZIGORÚ SZŰRÉS: Kiszámoljuk az aktuális RR arányt. Ha kisebb mint 1:3, elvetjük a jelet!
+        # SZIGORÚ SZŰRÉS: Minimum 1:3 tiszta RR arány ellenőrzése
         risk_dist = abs(entry_price - sl)
         reward_dist = abs(tp - entry_price)
         rr_ratio = reward_dist / risk_dist if risk_dist > 0 else 0
         if rr_ratio < 3.0: 
             return None
 
-        # DINAMIKUS TŐKEÁTTÉTEL JAVASLAT KISZÁMÍTÁSA (MAX 10x)
+        # DINAMIKUS TŐKEÁTTÉTEL JAVASLAT (MAX 10x)
         sl_percent = (risk_dist / entry_price)
         calculated_leverage = int(risk_percent / (sl_percent * 100)) if sl_percent > 0 else 1
-        leverage_suggestion = max(1, min(calculated_leverage, 10)) # Szigorúan lekorlátozva maximum 10-ig!
+        leverage_suggestion = max(1, min(calculated_leverage, 10))
 
         if fvg_type == "BEARISH_INVERSE" and current_price <= (fvg_high * 1.005):
             trade_signal = "SHORT / SELL"
@@ -177,7 +177,8 @@ scan_placeholder = st.empty()
 # 1. Háttér feldolgozás
 target_pairs = filtered_symbols[:scan_depth]
 for pair in target_pairs:
-    display_name = pair.split(':')[0] if ':' in pair else pair
+    # Levágjuk a felesleges karaktereket a kijelzéshez
+    display_name = str(pair).split(':')[0] if ':' in str(pair) else str(pair)
     scan_placeholder.text(f"Piac pásztázása... Ellenőrzés: {display_name}")
     res = analyze_pair(pair)
     if res and "VÁRAKOZÁS" not in res["trade_signal"]:
@@ -186,21 +187,21 @@ for pair in target_pairs:
 
 scan_placeholder.empty()
 
-# 2. GARANTÁLT KIRAJZOLÁS: Minden talált pár megkapja a saját fejlécét, chartját és adatait egymás alá lefelé!
+# 2. FIXÁLT KÉNYZERÍTETT KIRAJZOLÁS EGYSZERRE
 if active_signals:
     st.success(f"Találatok a piacon (Szigorú 1:3+ RR szűréssel): {len(active_signals)} db aktív setup!")
     for idx, (display_name, res) in enumerate(active_signals):
         df_ltf = res["df_ltf"]
         length = len(df_ltf)
         
-        # A) FEJLÉC KÁRTYA MINDEN PÁRHOZ KÜLÖN
+        # A) FEJLÉC KÁRTYA
         st.markdown(f"""
             <div class="signal-header">
                 <h3 style='margin:0; font-size:16px;'>🔥 {display_name} &nbsp;|&nbsp; Idősík: {res['chosen_tf']} &nbsp;|&nbsp; Irány: {res['trade_signal']}</h3>
             </div>
         """, unsafe_allow_html=True)
 
-        # B) TRADINGVIEW STÍLUSÚ GRAFIKON COORD-SZINKRONNAL (JAVÍTVA A STRING-LISTAHIBA)
+        # B) TRADINGVIEW STÍLUSÚ GRAFIKON (Kényszerített fix, egyszerűsített kulcsstruktúrával)
         fig = go.Figure()
         
         fig.add_trace(go.Candlestick(
@@ -209,16 +210,19 @@ if active_signals:
             increasing_fillcolor='#089981', decreasing_fillcolor='#f23645', name="Ár"
         ))
         
-        # Szintek kirajzolása elcsúszás nélkül
-        fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["htf_high"]]*length, name="HTF High Liq", line=dict(color='#26a69a', width=1.5)))
-        fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["htf_low"]]*length, name="HTF Low Liq", line=dict(color='#ef5350', width=1.5)))
+        fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["htf_high"]]*length, name="HTF High", line=dict(color='#26a69a', width=1.5)))
+        fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["htf_low"]]*length, name="HTF Low", line=dict(color='#ef5350', width=1.5)))
         fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["entry_price"]]*length, name="Belépő", line=dict(color='#29b6f6', width=2)))
         fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["sl"]]*length, name="SL", line=dict(color='#ff1744', width=1.5, dash='dash')))
         fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["tp"]]*length, name="TP", line=dict(color='#00e676', width=1.5)))
 
-        # Sárga FVG doboz és lila szaggatott vonal (CE 50%) hajszálpontosan elnyújtva
         if res["fvg_high"] > 0 and res["fvg_idx"] is not None:
             s_idx = int(res["fvg_idx"])
             e_idx = int(min(s_idx + 15, length - 1))
             
             t_start = df_ltf['time'].iloc[s_idx]
+            t_end = df_ltf['time'].iloc[e_idx]
+            
+            bx = [t_start, t_end, t_end, t_start, t_start]
+            by = [res["fvg_high"], res["fvg_high"], res["fvg_low"], res["fvg_low"], res["fvg_high"]]
+            
