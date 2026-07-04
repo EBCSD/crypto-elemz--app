@@ -1,4 +1,4 @@
-# Kesz_Alkalmazas_Vegleges_Hibatlan
+# Kesz_Alkalmazas_Folyamatos_Automata_Lista
 import streamlit as st
 import pandas as pd
 import ccxt
@@ -7,7 +7,7 @@ import time
 
 st.set_page_config(page_title="ALGO ICT PRO", layout="wide", initial_sidebar_state="collapsed")
 
-# Szigorú TradingView Dark Mobil téma és kártya stílusok beállítása (Nincs fehér felület)
+# Szigorú TradingView Dark Mobil téma és kártya stílusok beállítása (Garantáltan nincs fehér vagy üres felület)
 st.markdown("""
     <style>
     .block-container { padding-top: 1rem; padding-bottom: 1rem; background-color: #131722; }
@@ -19,8 +19,8 @@ st.markdown("""
         padding: 12px; 
         border-radius: 6px; 
         border-left: 5px solid #ffd600;
-        margin-top: 15px;
-        margin-bottom: 5px; 
+        margin-top: 20px;
+        margin-bottom: 15px; 
     }
     </style>
 """, unsafe_allow_html=True)
@@ -36,10 +36,6 @@ st.sidebar.markdown("---")
 st.sidebar.subheader("💰 Kockázatkezelés")
 total_balance = st.sidebar.number_input("Teljes Kereskedési Tőkéd ($):", min_value=10, value=1000)
 risk_percent = st.sidebar.slider("Kockázat (%):", min_value=0.5, max_value=100.0, value=5.0, step=0.5)
-
-st.sidebar.markdown("---")
-st.sidebar.subheader("🔍 Automata Keresési Mód")
-run_scanner = st.sidebar.checkbox("Automata Piacszkenner Bekapcsolása", value=True)
 
 # API Inicializálás
 exch = getattr(ccxt, exchange_id)({
@@ -150,66 +146,71 @@ def analyze_pair(pair_symbol):
     except:
         return None
 
-# --- ELEMZŐ MEGJELENÍTŐ RENDSZER ---
-st.subheader("🕵️‍♂️ Élő Kétirányú Piacszkenner (Grafikonos Lista)")
-scan_depth = st.slider("Átvizsgálandó top aktív párok száma:", min_value=10, max_value=100, value=30, step=10)
+# --- AUTOMATA FOLYAMATOS MEGJELENÍTÉS (GOMB NÉLKÜL, BIZTOSAN RAJZOL) ---
+st.subheader("🕵️‍♂️ Élő Kétirányú Piacszkenner (Grafikonos Sorozat)")
 
-if st.button("🔄 Piac Pásztázása és Találatok Azonnali Kirajzolása", use_container_width=True):
-    scan_placeholder = st.empty()
-    progress_bar = st.progress(0)
+# Csúszka az átnézendő párok mélységéhez (mobilon érdemes 15-20-on hagyni a gyorsaságért)
+scan_depth = st.slider("Átvizsgálandó top aktív párok száma:", min_value=5, max_value=50, value=20, step=5)
+
+scan_placeholder = st.empty()
+target_pairs = filtered_symbols[:scan_depth]
+found_any = False
+
+# Végigmegyünk a párokon és a gomb hiánya miatt a Streamlit kötelezően kirajzol mindent!
+for idx, pair in enumerate(target_pairs):
+    scan_placeholder.text(f"Párok folyamatos elemzése: {pair}...")
+    res = analyze_pair(pair)
     
-    target_pairs = filtered_symbols[:scan_depth]
-    found_any = False
-    
-    live_container = st.container()
-    
-    for idx, pair in enumerate(target_pairs):
-        progress_bar.progress((idx + 1) / len(target_pairs))
-        scan_placeholder.text(f"Párok elemzése háttérben: {pair}...")
+    if res and "VÁRAKOZÁS" not in res["trade_signal"]:
+        found_any = True
+        df_ltf = res["df_ltf"]
+        length = len(df_ltf)
         
-        res = analyze_pair(pair)
+        # 1. FEJLÉC KÁRTYA
+        st.markdown(f"""
+            <div class="signal-header">
+                <h3 style='margin:0; font-size:16px;'>🔥 {pair} &nbsp;|&nbsp; Idősík: {res['chosen_tf']} &nbsp;|&nbsp; Irány: {res['trade_signal']}</h3>
+            </div>
+        """, unsafe_allow_html=True)
         
-        if res and "VÁRAKOZÁS" not in res["trade_signal"]:
-            found_any = True
-            df_ltf = res["df_ltf"]
-            length = len(df_ltf)
+        # 2. TRADINGVIEW STÍLUSÚ GRAFIKON
+        fig = go.Figure()
+        
+        fig.add_trace(go.Candlestick(
+            x=df_ltf['time'], open=df_ltf['open'], high=df_ltf['high'], low=df_ltf['low'], close=df_ltf['close'],
+            increasing_line_color='#089981', decreasing_line_color='#f23645',
+            increasing_fillcolor='#089981', decreasing_fillcolor='#f23645', name="Ár"
+        ))
+        
+        fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["htf_high"]]*length, name="HTF Liq High", line=dict(color='#26a69a', width=1.5)))
+        fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["htf_low"]]*length, name="HTF Liq Low", line=dict(color='#ef5350', width=1.5)))
+
+        if res["fvg_high"] > 0 and res["fvg_start_idx"] is not None:
+            s_idx = int(res["fvg_start_idx"])
+            e_idx = int(min(s_idx + 10, length - 1))
             
-            with live_container:
-                # 1. Fejléc kártya sötét témával
-                st.markdown(f"""
-                    <div class="signal-header">
-                        <h3 style='margin:0; font-size:16px;'>🔥 {pair} &nbsp;|&nbsp; Idősík: {res['chosen_tf']} &nbsp;|&nbsp; Irány: {res['trade_signal']}</h3>
-                    </div>
-                """, unsafe_allow_html=True)
-                
-                # 2. TradingView stílusú grafikon felépítése (TŰPONTOSAN JAVÍTOTT ZÁRÓJELEKKEL)
-                fig = go.Figure()
-                
-                fig.add_trace(go.Candlestick(
-                    x=df_ltf['time'], open=df_ltf['open'], high=df_ltf['high'], low=df_ltf['low'], close=df_ltf['close'],
-                    increasing_line_color='#089981', decreasing_line_color='#f23645',
-                    increasing_fillcolor='#089981', decreasing_fillcolor='#f23645', name="Ár"
-                ))
-                
-                fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["htf_high"]]*length, name="HTF Liq High", line=dict(color='#26a69a', width=1.5)))
-                fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["htf_low"]]*length, name="HTF Liq Low", line=dict(color='#ef5350', width=1.5)))
+            t_start = df_ltf['time'].iloc[s_idx]
+            t_end = df_ltf['time'].iloc[e_idx]
+            
+            bx = [t_start, t_end, t_end, t_start, t_start]
+            by = [res["fvg_high"], res["fvg_high"], res["fvg_low"], res["fvg_low"], res["fvg_high"]]
+            
+            fig.add_trace(go.Scatter(x=bx, y=by, fill="toself", fillcolor="rgba(255, 214, 0, 0.05)", line=dict(color='#ffd600', width=1.5), showlegend=False))
+            fig.add_trace(go.Scatter(x=[t_start, t_end], y=[res["fvg_mid"], res["fvg_mid"]], line=dict(color='#e040fb', width=1.5, dash='dash'), name="CE 50%"))
 
-                # FVG téglalap és lila szaggatott vonal rajzolása szigorúan lezárt szögletes és kerek zárójelekkel
-                if res["fvg_high"] > 0 and res["fvg_start_idx"] is not None:
-                    s_idx = int(res["fvg_start_idx"])
-                    e_idx = int(min(s_idx + 10, length - 1))
-                    
-                    t_start = df_ltf['time'].iloc[s_idx]
-                    t_end = df_ltf['time'].iloc[e_idx]
-                    
-                    bx = [t_start, t_end, t_end, t_start, t_start]
-                    by = [res["fvg_high"], res["fvg_high"], res["fvg_low"], res["fvg_low"], res["fvg_high"]]
-                    
-                    fig.add_trace(go.Scatter(x=bx, y=by, fill="toself", fillcolor="rgba(255, 214, 0, 0.05)", line=dict(color='#ffd600', width=1.5), showlegend=False))
-                    fig.add_trace(go.Scatter(x=[t_start, t_end], y=[res["fvg_mid"], res["fvg_mid"]], line=dict(color='#e040fb', width=1.5, dash='dash'), name="CE 50%"))
+        fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["entry_price"]]*length, name="Belépő", line=dict(color='#29b6f6', width=2)))
+        fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["sl"]]*length, name="SL", line=dict(color='#ff1744', width=1.5, dash='dash')))
+        fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["tp"]]*length, name="TP", line=dict(color='#00e676', width=1.5)))
 
-                # Kereskedési szintek stabil kirajzolása
-                fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["entry_price"]]*length, name="Belépő", line=dict(color='#29b6f6', width=2)))
-                fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["sl"]]*length, name="SL", line=dict(color='#ff1744', width=1.5, dash='dash')))
-                fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["tp"]]*length, name="TP", line=dict(color='#00e676', width=1.5)))
-
+        fig.update_layout(
+            template="plotly_dark", xaxis_rangeslider_visible=False, height=390,
+            paper_bgcolor='#131722', plot_bgcolor='#131722', margin=dict(l=10, r=55, t=10, b=10),
+            showlegend=False,
+            yaxis=dict(side="right", gridcolor="#2a2e39", zeroline=False, tickfont=dict(color="#848e9c", size=10)),
+            xaxis=dict(gridcolor="#2a2e39", zeroline=False, tickfont=dict(color="#848e9c", size=10))
+        )
+        st.plotly_chart(fig, use_container_width=True, key=f"fixed_live_chart_{pair}_{idx}")
+        
+        # 3. DIGITÁLIS MÉRENDŐ ÁRAK KÖZVETLENÜL A GRAFIKON ALATT
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("BESZÁLÓ (CE)", f"${res['entry_price']:.5f}")
