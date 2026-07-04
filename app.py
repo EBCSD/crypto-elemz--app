@@ -20,15 +20,22 @@ with col_kock:
 
 @st.cache_data(ttl=30)
 def get_crypto_data(exch):
-    # A legújabb, garantáltan működő TradingView lekérdezési szintaxis
     q = (Query()
          .set_markets('crypto')
          .where(col('exchange') == exch)
          .select('name', 'close', 'volume', 'high', 'low', 'high|1h', 'low|1h', 'EMA20', 'ATR', 'RSI'))
     
-    # Kinyerjük a beépített szkener adatokat és táblázattá alakítjuk
-    data = q.get_scanner_data()
-    df = pd.DataFrame(data[1])
+    # A legújabb API struktúra szerint a .data listából olvassuk ki a sorokat
+    result = q.get_scanner_data()
+    
+    # Biztonságos adatátalakítás DataFrame-mé
+    rows = []
+    if hasattr(result, 'data') and result.data:
+        for item in result.data:
+            row_dict = item.d if hasattr(item, 'd') else item
+            rows.append(row_dict)
+            
+    df = pd.DataFrame(rows)
     return df
 
 try:
@@ -46,7 +53,7 @@ try:
 
     selected_pair = st.selectbox("🎯 Válassz kriptopárt:", pairs if pairs else ["Nincs elérhető adat"])
 
-    if selected_pair and pairs and not df.empty:
+    if selected_pair and pairs and selected_pair != "Nincs elérhető adat":
         coin = df[df['name'] == selected_pair].iloc[0]
         
         price = float(coin['close'])
@@ -90,10 +97,16 @@ try:
                 st.info(f"**Méret:** ${position_size_usd:,.2f}\n\n**Margin:** ${required_margin:,.2f}")
         else:
             st.info("⏳ Nincs aktív sweep. Várunk a likviditás kiszedésére.")
+    else:
+        st.warning("Válassz egy másik tőzsdét vagy piacot az oldalsó menüben a frissítéshez.")
 except Exception as e:
     st.error(f"Hiba az adatok feldolgozásában: {e}")
 
-        
+    
 
+
+            
+        
+                
         
         
