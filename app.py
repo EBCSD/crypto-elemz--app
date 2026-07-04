@@ -1,6 +1,5 @@
 # Kesz_Alkalmazas
 import streamlit as st
-import streamlit.components.v1 as components
 
 st.set_page_config(page_title="ICT Crypto Bot", layout="wide", initial_sidebar_state="collapsed")
 st.title("🏹 ICT Liquidity & Leverage Assistant")
@@ -33,31 +32,13 @@ cc2.metric("Javasolt Tőkeáttétel", f"{recommended_leverage}x")
 cc3.metric("Megnyitandó méret", f"${position_size_usd:,.2f} (Margin: ${required_margin:,.2f})")
 
 st.markdown("---")
-st.markdown("### 📊 Élő TradingView Kripto Szűrő & Bitget Párok")
-st.write("Használd a felső szűrőket (pl. Exchange: BITGET, Market: Futures) a sweep-ek kereséséhez:")
+st.markdown("### 📊 Élő TradingView Piacfigyelő & Bitget Szűrő")
+st.write("A telefonod böngészője blokkolja a beágyazott táblázatokat. Kattints az alábbi gombra a teljes, élő, szűrt TradingView Kripto Screener megnyitásához, ahol azonnal látod a Bitget párokat és az indikátorokat:")
 
-# Hivatalos, interaktív TradingView Screener beágyazása
-screener_html = """
-<div class="tradingview-widget-container" style="height:600px;width:100%;">
-  <div class="tradingview-widget-container__widget" style="height:600px;width:100%;"></div>
-  <script type="text/javascript" src="https://tradingview.com" async>
-  {
-  "width": "100%",
-  "height": "100%",
-  "defaultColumn": "overview",
-  "screener_type": "crypto_mkt",
-  "displayCurrency": "USD",
-  "colorTheme": "dark",
-  "locale": "en"
-}
-  </script>
-</div>
-"""
+# Biztonságos, közvetlen link gomb a TradingView hivatalos Kripto Szűrőjéhez
+st.link_button("📈 Élő TradingView Kripto Szűrő Megnyitása", "https://tradingview.com", use_container_width=True)
 
-components.html(screener_html, height=620, scrolling=True)
-
-    
-
+ 
              
     
     
