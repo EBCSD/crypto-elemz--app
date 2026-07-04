@@ -94,9 +94,9 @@ def draw_chart(df_plot, htf_high, htf_low, fvg_high, fvg_low, fvg_mid, signal, c
     fig.add_trace(go.Scatter(x=df_plot['time'], y=[htf_high]*len(df_plot), name="HTF High", line=dict(color='#00e676', width=1.5)))
     fig.add_trace(go.Scatter(x=df_plot['time'], y=[htf_low]*len(df_plot), name="HTF Low", line=dict(color='#00e676', width=1.5)))
     if fvg_high > 0 and fvg_low > 0:
-        fig.add_trace(go.Scatter(x=[df_plot['time'].iloc, df_plot['time'].iloc[-1]], y=[fvg_high, fvg_high], line=dict(color='#ffd600', width=2), showlegend=False))
-        fig.add_trace(go.Scatter(x=[df_plot['time'].iloc, df_plot['time'].iloc[-1]], y=[fvg_low, fvg_low], line=dict(color='#ffd600', width=2), showlegend=False))
-        fig.add_trace(go.Scatter(x=[df_plot['time'].iloc, df_plot['time'].iloc[-1]], y=[fvg_mid, fvg_mid], line=dict(color='#ffd600', width=1, dash='dash'), showlegend=False))
+        fig.add_trace(go.Scatter(x=[df_plot['time'].iloc[0], df_plot['time'].iloc[-1]], y=[fvg_high, fvg_high], line=dict(color='#ffd600', width=2), showlegend=False))
+        fig.add_trace(go.Scatter(x=[df_plot['time'].iloc[0], df_plot['time'].iloc[-1]], y=[fvg_low, fvg_low], line=dict(color='#ffd600', width=2), showlegend=False))
+        fig.add_trace(go.Scatter(x=[df_plot['time'].iloc[0], df_plot['time'].iloc[-1]], y=[fvg_mid, fvg_mid], line=dict(color='#ffd600', width=1, dash='dash'), showlegend=False))
         fig.add_hrect(y0=fvg_low, y1=fvg_high, fillcolor="rgba(255, 214, 0, 0.03)", line_width=0)
     if signal != "VÁRAKOZÁS":
         entry_line = fvg_low if signal == "SHORT / SELL" else fvg_high
@@ -127,44 +127,39 @@ def show_metrics(entry, sl, tp1, tp2, bal, risk):
     cc2.metric("Pozíció Méret", f"${pos_size:,.2f}")
     cc3.metric("Szükséges Margin", f"${margin:,.2f}")
 
-exch = init_exchange(exchange_id)
-exch.load_markets()
-all_symbols = list(exch.markets.keys())
-
-if market_type == "Futures":
-    filtered_symbols = [s for s in all_symbols if exch.markets[s].get('linear') or ('USDT' in s and ':' in s)]
-elif market_type == "Margin":
-    filtered_symbols = [s for s in all_symbols if exch.markets[s].get('margin')]
-else:
-    filtered_symbols = [s for s in all_symbols if exch.markets[s].get('spot')]
-
-if scan_all_pairs:
-    st.markdown("### ⚡ **Élő Piacszűrés...**")
-    active_trades_found = 0
-    symbols_to_scan = filtered_symbols[:50]
-    progress_bar = st.progress(0)
-    for index, sym in enumerate(symbols_to_scan):
-        try:
-            htf = exch.fetch_ohlcv(sym, timeframe='1h', limit=48)
-            l15m = exch.fetch_ohlcv(sym, timeframe='15m', limit=40)
-            l5m = exch.fetch_ohlcv(sym, timeframe='5m', limit=40)
-            if len(htf) < 10 or len(l15m) < 10: continue
-            df_h = pd.DataFrame(htf, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
-            df_15 = pd.DataFrame(l15m, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
-            df_5 = pd.DataFrame(l5m, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
-            df_15['time'] = pd.to_datetime(df_15['time'], unit='ms')
-            df_5['time'] = pd.to_datetime(df_5['time'], unit='ms')
-            signal, entry, sl, tp1, tp2, f_h, f_l, f_m, h_h, h_l, tf_used, df_active = analyze_strategy(df_h, df_15, df_5)
-            if signal != "VÁRAKOZÁS":
-                active_trades_found += 1
-                with st.expander(f"🔥 {sym} - {signal} ({tf_used})", expanded=True):
-                    draw_chart(df_active, h_h, h_l, f_h, f_l, f_m, signal, entry, sl, tp1, tp2, tf_used)
-                    show_metrics(entry, sl, tp1, tp2, total_balance, risk_percent)
-        except:
-            continue
-        progress_bar.progress((index + 1) / len(symbols_to_scan))
-    
-    # JAVÍTÁS: Egyenes, behúzási hiba nélküli kiértékelés
-    if active_trades_found == 0:
-        st.info("⏳ Nincs érvényes 15M vagy 5M Inverse FVG fordulat az 50 legaktívabb páron.")
-else:
+def run_pipeline():
+    exch = init_exchange(exchange_id)
+    exch.load_markets()
+    all_symbols = list(exch.markets.keys())
+    if market_type == "Futures":
+        filtered_symbols = [s for s in all_symbols if exch.markets[s].get('linear') or ('USDT' in s and ':' in s)]
+    elif market_type == "Margin":
+        filtered_symbols = [s for s in all_symbols if exch.markets[s].get('margin')]
+    else:
+        filtered_symbols = [s for s in all_symbols if exch.markets[s].get('spot')]
+    if scan_all_pairs:
+        st.markdown("### ⚡ **Élő Piacszűrés...**")
+        active_trades_found = 0
+        symbols_to_scan = filtered_symbols[:50]
+        progress_bar = st.progress(0)
+        for index, sym in enumerate(symbols_to_scan):
+            try:
+                htf = exch.fetch_ohlcv(sym, timeframe='1h', limit=48)
+                l15m = exch.fetch_ohlcv(sym, timeframe='15m', limit=40)
+                l5m = exch.fetch_ohlcv(sym, timeframe='5m', limit=40)
+                if len(htf) < 10 or len(l15m) < 10: continue
+                df_h = pd.DataFrame(htf, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
+                df_15 = pd.DataFrame(l15m, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
+                df_5 = pd.DataFrame(l5m, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
+                df_15['time'] = pd.to_datetime(df_15['time'], unit='ms')
+                df_5['time'] = pd.to_datetime(df_5['time'], unit='ms')
+                signal, entry, sl, tp1, tp2, f_h, f_l, f_m, h_h, h_l, tf_used, df_active = analyze_strategy(df_h, df_15, df_5)
+                if signal != "VÁRAKOZÁS":
+                    active_trades_found += 1
+                    with st.expander(f"🔥 {sym} - {signal} ({tf_used})", expanded=True):
+                        draw_chart(df_active, h_h, h_l, f_h, f_l, f_m, signal, entry, sl, tp1, tp2, tf_used)
+                        show_metrics(entry, sl, tp1, tp2, total_balance, risk_percent)
+            except:
+                continue
+            progress_bar.progress((index + 1) / len(symbols_to_scan))
+        if active_trades_found == 0:
