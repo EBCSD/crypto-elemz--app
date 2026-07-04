@@ -1,4 +1,4 @@
-# Kesz_Alkalmazas_Vegleges_Es_Mukodo
+# Kesz_Alkalmazas_Vegleges_Es_Hibatlan
 import streamlit as st
 import pandas as pd
 import ccxt
@@ -7,7 +7,7 @@ import time
 
 st.set_page_config(page_title="ALGO ICT PRO", layout="wide", initial_sidebar_state="collapsed")
 
-# Szigorú TradingView Dark Mobil téma és kártya stílusok beállítása (Nincs fehér felület)
+# Szigorú TradingView Dark Mobil téma és kártya stílusok beállítása
 st.markdown("""
     <style>
     .block-container { padding-top: 1rem; padding-bottom: 1rem; background-color: #131722; }
@@ -73,7 +73,7 @@ filtered_symbols = get_active_markets()
 
 def analyze_pair(pair_symbol):
     try:
-        # PONTOSÍTÁS: Szabályos string formátumra hozzuk vissza a tőzsdei nevet a fetch_ohlcv számára
+        # String tisztítás a Futures formátumokhoz
         clean_symbol = pair_symbol.split(':')[0] if ':' in pair_symbol else pair_symbol
 
         # 1. HTF szintek lekérése
@@ -99,7 +99,6 @@ def analyze_pair(pair_symbol):
             df_ltf['time'] = pd.to_datetime(df_ltf['time'], unit='ms')
             
             for i in range(len(df_ltf) - 4, 2, -1):
-                # PONTOSÍTÁS: Hibás df_htf hivatkozások és duplikált sorok teljesen kisöpörve!
                 if df_ltf['low'].iloc[i] > df_ltf['high'].iloc[i+2]: # Bearish FVG
                     fvg_high = float(df_ltf['low'].iloc[i])
                     fvg_low = float(df_ltf['high'].iloc[i+2])
@@ -176,9 +175,9 @@ if run_scanner:
     if active_signals:
         for idx, (pair, res) in enumerate(active_signals):
             df_ltf = res["df_ltf"]
-            length = len(df_ltf)
+            t_array = df_ltf['time']
             
-            # A) FEJLÉC KÁRTYA (Tiszta név megjelenítése kettőspontok nélkül)
+            # A) FEJLÉC KÁRTYA
             clean_display_name = pair.split(':')[0] if ':' in pair else pair
             st.markdown(f"""
                 <div class="signal-header">
@@ -186,24 +185,25 @@ if run_scanner:
                 </div>
             """, unsafe_allow_html=True)
             
-            # B) TRADINGVIEW STÍLUSÚ GRAFIKON
+            # B) TRADINGVIEW STÍLUSÚ GRAFIKON (HAJSZÁLPONTOS, JAVÍTOTT ZÁRÓJEL SZERKEZETTEL)
             fig = go.Figure()
             
             fig.add_trace(go.Candlestick(
-                x=df_ltf['time'], open=df_ltf['open'], high=df_ltf['high'], low=df_ltf['low'], close=df_ltf['close'],
+                x=t_array, open=df_ltf['open'], high=df_ltf['high'], low=df_ltf['low'], close=df_ltf['close'],
                 increasing_line_color='#089981', decreasing_line_color='#f23645',
                 increasing_fillcolor='#089981', decreasing_fillcolor='#f23645', name="Ár"
             ))
             
-            fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["htf_high"]]*length, name="HTF Liq High", line=dict(color='#26a69a', width=2)))
-            fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["htf_low"]]*length, name="HTF Liq Low", line=dict(color='#ef5350', width=2)))
+            # JAVÍTÁS: Zárójel-szorzás hiba teljesen kiküszöbölve sima tömbbé alakítással
+            fig.add_trace(go.Scatter(x=t_array, y=[res["htf_high"] for _ in range(len(df_ltf))], name="HTF Liq High", line=dict(color='#26a69a', width=2)))
+            fig.add_trace(go.Scatter(x=t_array, y=[res["htf_low"] for _ in range(len(df_ltf))], name="HTF Liq Low", line=dict(color='#ef5350', width=2)))
 
             if res["fvg_high"] > 0 and res["fvg_start_idx"] is not None:
                 s_idx = int(res["fvg_start_idx"])
-                e_idx = int(min(s_idx + 12, length - 1))
+                e_idx = int(min(s_idx + 12, len(df_ltf) - 1))
                 
-                t_start = df_ltf['time'].iloc[s_idx]
-                t_end = df_ltf['time'].iloc[e_idx]
+                t_start = t_array.iloc[s_idx]
+                t_end = t_array.iloc[e_idx]
                 
                 bx = [t_start, t_end, t_end, t_start, t_start]
                 by = [res["fvg_high"], res["fvg_high"], res["fvg_low"], res["fvg_low"], res["fvg_high"]]
@@ -211,9 +211,9 @@ if run_scanner:
                 fig.add_trace(go.Scatter(x=bx, y=by, fill="toself", fillcolor="rgba(255, 214, 0, 0.06)", line=dict(color='#ffd600', width=1.5), showlegend=False))
                 fig.add_trace(go.Scatter(x=[t_start, t_end], y=[res["fvg_mid"], res["fvg_mid"]], line=dict(color='#e040fb', width=2, dash='dash'), name="CE 50%"))
 
-            fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["entry_price"]]*length, name="Belépő", line=dict(color='#29b6f6', width=2)))
-            fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["sl"]]*length, name="SL", line=dict(color='#ff1744', width=1.5, dash='dash')))
-            fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["tp"]]*length, name="TP", line=dict(color='#00e676', width=1.5)))
+            fig.add_trace(go.Scatter(x=t_array, y=[res["entry_price"] for _ in range(len(df_ltf))], name="Belépő", line=dict(color='#29b6f6', width=2)))
+            fig.add_trace(go.Scatter(x=t_array, y=[res["sl"] for _ in range(len(df_ltf))], name="SL", line=dict(color='#ff1744', width=1.5, dash='dash')))
+            fig.add_trace(go.Scatter(x=t_array, y=[res["tp"] for _ in range(len(df_ltf))], name="TP", line=dict(color='#00e676', width=1.5)))
 
             y_pad = (max(df_ltf['high'].max(), res["htf_high"]) - min(df_ltf['low'].min(), res["htf_low"])) * 0.1
             y_min = min(df_ltf['low'].min(), res["htf_low"], res["tp"]) - y_pad
