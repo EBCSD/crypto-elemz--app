@@ -1,17 +1,32 @@
-# 1. Optimalizáljuk az adatgyűjtést (cache-elés)
-@st.cache_data(ttl=60) # A cache 60 másodpercig tárolja az adatot
-def get_data_fast(symbol, timeframe):
+import streamlit as st
+import ccxt
+import pandas as pd
+import time
+
+# 1. Globális inicializálás (ITT VAN A HIBA FORRÁSA, EZT KELL JÓL BEÍRNI)
+@st.cache_resource
+def get_exchange():
+    return ccxt.bitget({'enableRateLimit': True})
+
+exch = get_exchange() # Ez definiálja az exch-t
+
+st.title("⚡ ALGO ICT PRO - FIX")
+
+# 2. Definiáljuk a függvényeket
+def analyze_pair(symbol):
+    # Itt használhatod az exch-t, mert globálisan elérhető
     try:
-        return exch.fetch_ohlcv(symbol, timeframe=timeframe, limit=20)
-    except:
+        # ... a logikád ...
+        return {"data": "ok"}
+    except Exception as e:
         return None
 
-# 2. Egyszerűsítsd a szkennert (ne akarjon 100 párat egyszerre kiszámolni)
+# 3. Fő rész
+run_scanner = st.checkbox("Szkennelés indítása")
+
 if run_scanner:
-    st.subheader("🕵️‍♂️ Piacfigyelő aktív...")
-    # Csak az első 20 legfontosabb párt nézze, ne az összeset
-    for pair in filtered_symbols[:20]: 
-        res = analyze_pair(pair)
+    symbols = ['BTC/USDT', 'ETH/USDT'] # Kezdd pár darabbal, ne az összeset!
+    for sym in symbols:
+        res = analyze_pair(sym)
         if res:
-            render_signal_block(pair, res, pair)
-        # Ha nem talál, ne írjon ki semmit, csak lépjen tovább
+            st.write(f"Találat: {sym}")
