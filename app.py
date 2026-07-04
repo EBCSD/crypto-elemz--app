@@ -1,4 +1,4 @@
-# Kesz_Alkalmazas_Dinamic_Live_List
+# Kesz_Alkalmazas_Vegleges_Es_Mukoedo
 import streamlit as st
 import pandas as pd
 import ccxt
@@ -7,7 +7,7 @@ import time
 
 st.set_page_config(page_title="ALGO ICT PRO", layout="wide", initial_sidebar_state="collapsed")
 
-# Szigorú TradingView Dark Mobil téma és kártya stílusok beállítása
+# Szigorú TradingView Dark Mobil téma és kártya stílusok beállítása (Nincs fehér felület)
 st.markdown("""
     <style>
     .block-container { padding-top: 1rem; padding-bottom: 1rem; background-color: #131722; }
@@ -36,6 +36,10 @@ st.sidebar.markdown("---")
 st.sidebar.subheader("💰 Kockázatkezelés")
 total_balance = st.sidebar.number_input("Teljes Kereskedési Tőkéd ($):", min_value=10, value=1000)
 risk_percent = st.sidebar.slider("Kockázat (%):", min_value=0.5, max_value=100.0, value=5.0, step=0.5)
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("🔍 Automata Keresési Mód")
+run_scanner = st.sidebar.checkbox("Automata Piacszkenner Bekapcsolása", value=True)
 
 # API Inicializálás
 exch = getattr(ccxt, exchange_id)({
@@ -115,6 +119,7 @@ def analyze_pair(pair_symbol):
         was_sell_swept = df_ltf['low'].min() <= htf_low
         was_buy_swept = df_ltf['high'].max() >= htf_high
         
+        # Stratégia kiértékelése a visszahúzódás alapján
         if found_fvg and fvg_index_start is not None:
             if was_buy_swept and fvg_type == "BEARISH":
                 post_fvg_df = df_ltf.iloc[fvg_index_start+2:]
@@ -145,7 +150,7 @@ def analyze_pair(pair_symbol):
     except:
         return None
 
-# --- DINAMIKUS ÉLŐ MEGJELENÍTŐ RENDSZER ---
+# --- FOLYAMATOS ELEMZŐ MEGJELENÍTŐ RENDSZER ---
 st.subheader("🕵️‍♂️ Élő Kétirányú Piacszkenner (Grafikonos Lista)")
 scan_depth = st.slider("Átvizsgálandó top aktív párok száma:", min_value=10, max_value=100, value=30, step=10)
 
@@ -156,7 +161,6 @@ if st.button("🔄 Piac Pásztázása és Találatok Azonnali Kirajzolása", use
     target_pairs = filtered_symbols[:scan_depth]
     found_any = False
     
-    # Külön Streamlit konténer az egymás alá érkező élő találatokhoz
     live_container = st.container()
     
     for idx, pair in enumerate(target_pairs):
@@ -169,16 +173,15 @@ if st.button("🔄 Piac Pásztázása és Találatok Azonnali Kirajzolása", use
             found_any = True
             df_ltf = res["df_ltf"]
             
-            # Azonnali, élő kirajzolás a kijelölt konténerbe egymás alá!
             with live_container:
-                # 1. Párhoz tartozó sötét fejléc kártya
+                # 1. Fejléc kártya sötét témával
                 st.markdown(f"""
                     <div class="signal-header">
                         <h3 style='margin:0; font-size:16px;'>🔥 {pair} &nbsp;|&nbsp; Idősík: {res['chosen_tf']} &nbsp;|&nbsp; Irány: {res['trade_signal']}</h3>
                     </div>
                 """, unsafe_allow_html=True)
                 
-                # 2. Az adott pár tűpontos TradingView stílusú grafikona
+                # 2. TradingView stílusú grafikon felépítése
                 fig = go.Figure()
                 
                 fig.add_trace(go.Candlestick(
@@ -187,11 +190,10 @@ if st.button("🔄 Piac Pásztázása és Találatok Azonnali Kirajzolása", use
                     increasing_fillcolor='#089981', decreasing_fillcolor='#f23645', name="Ár"
                 ))
                 
-                # HTF szintek berajzolása a megfelelő csúcsokra
                 fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["htf_high"]]*len(df_ltf), name="HTF Liq High", line=dict(color='#26a69a', width=1.5)))
                 fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["htf_low"]]*len(df_ltf), name="HTF Liq Low", line=dict(color='#ef5350', width=1.5)))
 
-                # Sárga FVG téglalap és lila szaggatott CE középvonal pontos lezárása
+                # JAVÍTÁS: A szögletes zárójelek hajszálpontosan lezárva (.iloc[s_idx] és .iloc[e_idx])
                 if res["fvg_high"] > 0 and res["fvg_start_idx"] is not None:
                     s_idx = res["fvg_start_idx"]
                     e_idx = min(s_idx + 10, len(df_ltf) - 1)
@@ -202,7 +204,7 @@ if st.button("🔄 Piac Pásztázása és Találatok Azonnali Kirajzolása", use
                     fig.add_trace(go.Scatter(x=bx, y=by, fill="toself", fillcolor="rgba(255, 214, 0, 0.05)", line=dict(color='#ffd600', width=1.5), showlegend=False))
                     fig.add_trace(go.Scatter(x=[df_ltf['time'].iloc[s_idx], df_ltf['time'].iloc[e_idx]], y=[res["fvg_mid"], res["fvg_mid"]], line=dict(color='#e040fb', width=1.5, dash='dash'), name="CE 50%"))
 
-                # Kereskedési szintek vonalai
+                # Kereskedési szintek
                 fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["entry_price"]]*len(df_ltf), name="Belépő", line=dict(color='#29b6f6', width=2)))
                 fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["sl"]]*len(df_ltf), name="SL", line=dict(color='#ff1744', width=1.5, dash='dash')))
                 fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["tp"]]*len(df_ltf), name="TP", line=dict(color='#00e676', width=1.5)))
