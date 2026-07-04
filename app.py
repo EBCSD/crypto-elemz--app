@@ -4,7 +4,7 @@ import ccxt
 import plotly.graph_objects as go
 import time
 
-# 1. OLDALBEÁLLÍTÁSOK ÉS MOBIL DESIGN
+# 1. OLDALBEÁLLÍTÁSOK ÉS TRADINGVIEW DESIGN
 st.set_page_config(page_title="ALGO ICT PRO", layout="wide", initial_sidebar_state="collapsed")
 
 st.markdown("""
@@ -32,9 +32,9 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("⚡ ALGO ICT PRO V2")
-st.caption("Advanced Institutional Liquidity Terminal | Fresh Build")
+st.caption("Advanced Institutional Liquidity Terminal | Powered by Bitget")
 
-# 2. OLDALSÁV (VEZÉRLŐPULT)
+# 2. VEZÉRLŐPULT (OLDALSÁV)
 st.sidebar.header("🎛️ Vezérlőpult")
 exchange_id = st.sidebar.selectbox("1. Válassz Tőzsdét:", ["bitget", "binance", "bybit", "okx"])
 market_type = st.sidebar.radio("2. Kereskedési mód:", ["Futures", "Spot"])
@@ -44,7 +44,7 @@ st.sidebar.subheader("💰 Kockázatkezelés")
 total_balance = st.sidebar.number_input("Teljes Kereskedési Tőkéd ($):", min_value=10, value=1000)
 risk_percent = st.sidebar.slider("Kockázat (%):", min_value=0.5, max_value=100.0, value=5.0, step=0.5)
 
-# 3. TŐZSDEI API INICIALIZÁLÁS
+# 3. TŐZSDEI MODUL INITIALIZÁLÁS
 exch = getattr(ccxt, exchange_id)({
     'enableRateLimit': True,
     'options': {'defaultType': 'future' if market_type == "Futures" else 'spot'}
@@ -66,13 +66,11 @@ def get_active_markets():
 
 filtered_symbols = get_active_markets()
 
-# 4. STRATÉGIA ÉS ELEMZŐ MOTOR (SÖPRÉS -> INVERZIÓ -> VISSZATESZT)
+# 4. STRATÉGIA KIÉRTÉKELŐ MOTOR
 def analyze_pair(pair_symbol):
     try:
-        # Karaktertisztítás a Futures párok lekérdezéséhez
         clean_symbol = pair_symbol.split(':')[0] if ':' in pair_symbol else pair_symbol
 
-        # HTF (1h) szintek lekérése a likviditási korlátokhoz
         htf_ohlcv = exch.fetch_ohlcv(clean_symbol, timeframe='1h', limit=48)
         if not htf_ohlcv: return None
         df_htf = pd.DataFrame(htf_ohlcv, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
@@ -80,7 +78,6 @@ def analyze_pair(pair_symbol):
         htf_high = float(df_htf['high'].iloc[:-3].max())
         htf_low = float(df_htf['low'].iloc[:-3].min())
 
-        # LTF (15m vagy 5m) idősík és FVG doboz meghatározása
         timeframes = ['15m', '5m']
         chosen_tf = '15m'
         df_ltf = pd.DataFrame()
@@ -96,7 +93,7 @@ def analyze_pair(pair_symbol):
             df_ltf['time'] = pd.to_datetime(df_ltf['time'], unit='ms')
 
             for i in range(len(df_ltf) - 4, 2, -1):
-                if df_ltf['low'].iloc[i] > df_ltf['high'].iloc[i+2]: # Bearish FVG
+                if df_ltf['low'].iloc[i] > df_ltf['high'].iloc[i+2]:
                     fvg_high = float(df_ltf['low'].iloc[i])
                     fvg_low = float(df_ltf['high'].iloc[i+2])
                     fvg_idx = i
@@ -104,7 +101,7 @@ def analyze_pair(pair_symbol):
                     found_fvg = True
                     chosen_tf = tf
                     break
-                elif df_ltf['high'].iloc[i] < df_ltf['low'].iloc[i+2]: # Bullish FVG
+                elif df_ltf['high'].iloc[i] < df_ltf['low'].iloc[i+2]:
                     fvg_high = float(df_ltf['low'].iloc[i+2])
                     fvg_low = float(df_ltf['high'].iloc[i])
                     fvg_idx = i
@@ -127,7 +124,6 @@ def analyze_pair(pair_symbol):
         was_sell_swept = df_ltf['low'].min() <= htf_low
         was_buy_swept = df_ltf['high'].max() >= htf_high
 
-        # Éles visszateszt ellenőrzés
         if fvg_type == "BEARISH" and was_buy_swept:
             post_df = df_ltf.iloc[fvg_idx+2:]
             if not post_df.empty and post_df['high'].max() >= (fvg_low * 0.998):
@@ -145,14 +141,13 @@ def analyze_pair(pair_symbol):
     except:
         return None
 
-# 5. AUTOMATA PIACSZKENNER ÉS FOLYAMATOS LISTÁZÁS
+# 5. AUTOMATA MEGJELENÍTŐ RENDSZER
 st.subheader("🕵️‍♂️ Élő Kétirányú Piacszkenner (Grafikonos Sorozat)")
 scan_depth = st.slider("Átvizsgálandó top aktív párok száma:", min_value=5, max_value=30, value=15, step=5)
 
 active_signals = []
 scan_placeholder = st.empty()
 
-# Adatok összegyűjtése a háttérben
 target_pairs = filtered_symbols[:scan_depth]
 for pair in target_pairs:
     scan_placeholder.text(f"Piac pásztázása... Ellenőrzés: {pair}")
@@ -163,20 +158,17 @@ for pair in target_pairs:
 
 scan_placeholder.empty()
 
-# Garantált, tiszta struktúrájú kirajzolás egymás alá
 if active_signals:
     for idx, (pair, res) in enumerate(active_signals):
         df_ltf = res["df_ltf"]
         clean_name = pair.split(':')[0] if ':' in pair else pair
 
-        # A) FEJLÉC KÁRTYA
         st.markdown(f"""
             <div class="signal-header">
                 <h3 style='margin:0; font-size:16px;'>🔥 {clean_name} &nbsp;|&nbsp; Idősík: {res['chosen_tf']} &nbsp;|&nbsp; Irány: {res['trade_signal']}</h3>
             </div>
         """, unsafe_allow_html=True)
 
-        # B) TRADINGVIEW STÍLUSÚ GRAFIKON (ATOMBOSZTOS HLINE MEGOLDÁSSAL - NINCS TÖBBÉ ZÁRÓJEL HIBA)
         fig = go.Figure()
         
         fig.add_trace(go.Candlestick(
@@ -185,14 +177,12 @@ if active_signals:
             increasing_fillcolor='#089981', decreasing_fillcolor='#f23645', name="Ár"
         ))
         
-        # Statikus szintek kirajzolása natív, stabil Plotly függvénnyel
         fig.add_hline(y=res["htf_high"], line_color="#26a69a", line_width=2)
         fig.add_hline(y=res["htf_low"], line_color="#ef5350", line_width=2)
         fig.add_hline(y=res["entry_price"], line_color="#29b6f6", line_width=2)
         fig.add_hline(y=res["sl"], line_color="#ff1744", line_width=1.5, line_dash="dash")
         fig.add_hline(y=res["tp"], line_color="#00e676", line_width=1.5)
 
-        # Sárga FVG téglalap és lila szaggatott középvonal pontos berajzolása
         if res["fvg_high"] > 0 and res["fvg_idx"] is not None:
             s_idx = int(res["fvg_idx"])
             e_idx = int(min(s_idx + 12, len(df_ltf) - 1))
@@ -206,7 +196,6 @@ if active_signals:
             fig.add_trace(go.Scatter(x=bx, y=by, fill="toself", fillcolor="rgba(255, 214, 0, 0.06)", line=dict(color='#ffd600', width=1.5), showlegend=False))
             fig.add_trace(go.Scatter(x=[t_start, t_end], y=[res["fvg_mid"], res["fvg_mid"]], line=dict(color='#e040fb', width=2, dash='dash'), showlegend=False))
 
-        # Y-tengely automatikus igazítása a gyertyákhoz
         y_pad = (max(df_ltf['high'].max(), res["htf_high"]) - min(df_ltf['low'].min(), res["htf_low"])) * 0.1
         y_min = min(df_ltf['low'].min(), res["htf_low"], res["tp"]) - y_pad
         y_max = max(df_ltf['high'].max(), res["htf_high"], res["tp"]) + y_pad
@@ -220,8 +209,14 @@ if active_signals:
         )
         st.plotly_chart(fig, use_container_width=True, key=f"v2_chart_{clean_name}_{idx}")
         
-        # C) HAJSZÁLPONTOS ADATBLOKK FIX HTML-BEN KÖZVETLENÜL A CHART ALATT
         st.markdown(f"""
             <div class="data-row">
                 <p style='margin:3px; font-size:15px; color:#29b6f6;'><b>🟢 BESZÁLÓ (CE 50%):</b> ${res['entry_price']:.5f}</p>
                 <p style='margin:3px; font-size:15px; color:#ff1744;'><b>🔴 STOP LOSS (SL):</b> ${res['sl']:.5f}</p>
+                <p style='margin:3px; font-size:15px; color:#00e676;'><b>🔵 TAKE PROFIT (TP):</b> ${res['tp']:.5f}</p>
+                <p style='margin:3px; font-size:14px; color:#848e9c;'><b>📊 AKTUÁLIS ÁR:</b> ${res['current_price']:.5f}</p>
+            </div>
+            <br>
+        """, unsafe_allow_html=True)
+else:
+    st.info("Jelenleg nincs aktív visszazúzódási szignál a vizsgált tartományban.")
