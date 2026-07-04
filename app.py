@@ -3,7 +3,6 @@ import pandas as pd
 import ccxt
 import plotly.graph_objects as go
 import time
-import numpy as np
 
 # --- RSI INDIKÁTOR SZÁMÍTÁSA ---
 def calculate_rsi(data, window=14):
@@ -54,7 +53,7 @@ def get_active_markets():
 
 filtered_symbols = get_active_markets()
 
-# --- ÚJ STRATÉGIA MOTOR: HTF SWEEP + PONTOS iFVG RETEST + RSI ---
+# --- TÖKÉLETESÍTETT STRATÉGIA MOTOR ---
 def analyze_pair(pair_symbol):
     try:
         clean_symbol = pair_symbol.split(':')[0] if ':' in pair_symbol else pair_symbol
@@ -69,8 +68,8 @@ def analyze_pair(pair_symbol):
         htf_high = max(float(df_1h['high'].iloc[:-2].max()), float(df_4h['high'].iloc[:-2].max()))
         htf_low = min(float(df_1h['low'].iloc[:-2].min()), float(df_4h['low'].iloc[:-2].min()))
 
-        # 2. LTF Elemzés
-        ltf_ohlcv = exch.fetch_ohlcv(clean_symbol, timeframe='15m', limit=50)
+        # 2. LTF Elemzés (15m)
+        ltf_ohlcv = exch.fetch_ohlcv(clean_symbol, timeframe='15m', limit=60)
         if not ltf_ohlcv: return None
         df_ltf = pd.DataFrame(ltf_ohlcv, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
         df_ltf['time'] = pd.to_datetime(df_ltf['time'], unit='ms')
@@ -85,55 +84,57 @@ def analyze_pair(pair_symbol):
         swept_htf_high = ltf_recent_high >= (htf_high * 0.999)
         swept_htf_low = ltf_recent_low <= (htf_low * 1.001)
 
-        fvg_candidates = []
+        short_candidates = []
+        long_candidates = []
 
-        # 3. AZ ÖSSZES iFVG VISSZATESZT KERESÉSE
-        # Sokkal szélesebb spektrumban keresünk, egészen az utolsó előtti gyertyáig
+        # 3. AZ ÖSSZES FVG ÉS INVERZ FVG FELKUTATÁSA A CSÚCSON/VÖLGYÖN
         for i in range(max(0, length - 40), length - 2): 
             
-            # --- BEARISH INVERSE FVG SETUP (SHORT) ---
-            if swept_htf_high and df_ltf['low'].iloc[i+2] > df_ltf['high'].iloc[i]:
-                fvg_bot = float(df_ltf['high'].iloc[i])
-                fvg_top = float(df_ltf['low'].iloc[i+2])
+            # --- SHORT SETUP KERESÉSE ---
+            # iFVG (Bullish FVG ami letört) VAGY sima Bearish FVG ami a fordulónál alakult ki
+            if (df_ltf['low'].iloc[i+2] > df_ltf['high'].iloc[i]) or (df_ltf['high'].iloc[i+2] < df_ltf['low'].iloc[i]):
                 
-                # Zárt az ár az FVG alatt?
-                if any(df_ltf['close'].iloc[i+3:] < fvg_bot):
-                    # Visszateszt
-                    if fvg_bot <= current_price <= fvg_top:
-                        if current_rsi < 55:
-                            fvg_candidates.append({
-                                "type": "SHORT / SELL", "fvg_high": fvg_top, "fvg_low": fvg_bot, "idx": i
-                            })
-
-            # --- BULLISH INVERSE FVG SETUP (LONG) ---
-            elif swept_htf_low and df_ltf['high'].iloc[i+2] < df_ltf['low'].iloc[i]:
-                fvg_top = float(df_ltf['low'].iloc[i])
-                fvg_bot = float(df_ltf['high'].iloc[i+2])
+                fvg_top = max(float(df_ltf['low'].iloc[i+2]), float(df_ltf['low'].iloc[i])) if df_ltf['low'].iloc[i+2] > df_ltf['high'].iloc[i] else float(df_ltf['low'].iloc[i])
+                fvg_bot = min(float(df_ltf['high'].iloc[i]), float(df_ltf['high'].iloc[i+2])) if df_ltf['low'].iloc[i+2] > df_ltf['high'].iloc[i] else float(df_ltf['high'].iloc[i+2])
                 
-                # Zárt az ár az FVG felett?
-                if any(df_ltf['close'].iloc[i+3:] > fvg_top):
-                    # Visszateszt
-                    if fvg_bot <= current_price <= fvg_top:
-                        if current_rsi > 45:
-                            fvg_candidates.append({
-                                "type": "LONG / BUY", "fvg_high": fvg_top, "fvg_low": fvg_bot, "idx": i
-                            })
+                fvg_size = fvg_top - fvg_bot
+                
+                # "MÁR MEGTÖRTÉNT A TRADE" SZŰRŐ! (Csak akkor érvényes, ha az ár MOST teszteli a zónát)
+                # Ha az ár már beesett (több mint a doboz másfélszerese), akkor ELVETJÜK!
+                short_active = (fvg_bot - (fvg_size * 1.2)) <= current_price <= (fvg_top * 1.002)
+                
+                if short_active and current_rsi < 55:
+                    short_candidates.append({
+                        "type": "SHORT / SELL", "fvg_high": fvg_top, "fvg_low": fvg_bot, "idx": i
+                    })
 
-        # NINCS TALÁLAT
-        if not fvg_candidates: return None
+            # --- LONG SETUP KERESÉSE ---
+            if (df_ltf['high'].iloc[i+2] < df_ltf['low'].iloc[i]) or (df_ltf['low'].iloc[i+2] > df_ltf['high'].iloc[i]):
+                
+                fvg_top = min(float(df_ltf['low'].iloc[i]), float(df_ltf['low'].iloc[i+2])) if df_ltf['high'].iloc[i+2] < df_ltf['low'].iloc[i] else float(df_ltf['low'].iloc[i+2])
+                fvg_bot = max(float(df_ltf['high'].iloc[i+2]), float(df_ltf['high'].iloc[i])) if df_ltf['high'].iloc[i+2] < df_ltf['low'].iloc[i] else float(df_ltf['high'].iloc[i])
+                
+                fvg_size = fvg_top - fvg_bot
+                
+                # "MÁR MEGTÖRTÉNT A TRADE" SZŰRŐ LONGRA
+                long_active = (fvg_bot * 0.998) <= current_price <= (fvg_top + (fvg_size * 1.2))
+                
+                if long_active and current_rsi > 45:
+                    long_candidates.append({
+                        "type": "LONG / BUY", "fvg_high": fvg_top, "fvg_low": fvg_bot, "idx": i
+                    })
 
-        # 4. A LEGJOBB iFVG KIVÁLASZTÁSA (A FORDULÓPONTHOZ LEGKÖZELEBBI!)
-        short_candidates = [c for c in fvg_candidates if c["type"] == "SHORT / SELL"]
-        long_candidates = [c for c in fvg_candidates if c["type"] == "LONG / BUY"]
-
-        if short_candidates:
-            # Ha SHORT, a legmagasabb iFVG kell (amelyik a csúcson alakult ki)
+        # 4. A LEGMAGASABB/LEGALACSONYABB FVG KIVÁLASZTÁSA (A kék doboz szabály!)
+        best_fvg = None
+        if swept_htf_high and short_candidates:
+            # Csak a legmagasabb ponton lévő (csúcshoz legközelebbi) FVG-t fogadja el!
             best_fvg = max(short_candidates, key=lambda x: x["fvg_high"])
-        elif long_candidates:
-            # Ha LONG, a legalacsonyabb iFVG kell (amelyik a völgyben alakult ki)
+        elif swept_htf_low and long_candidates:
+            # Csak a legalacsonyabb ponton lévő FVG-t fogadja el!
             best_fvg = min(long_candidates, key=lambda x: x["fvg_low"])
-        else:
-            return None
+
+        if not best_fvg: 
+            return None # HA NINCS AKTÍV FVG, VAGY ELMENT A TRADE, NEM LISTÁZZA!
 
         fvg_high = best_fvg["fvg_high"]
         fvg_low = best_fvg["fvg_low"]
@@ -143,7 +144,7 @@ def analyze_pair(pair_symbol):
         fvg_mid = (fvg_high + fvg_low) / 2.0
         entry_price = current_price
         
-        # 5. Kockázatkezelés (Szoros SL az iFVG szélén, 1:3 RR)
+        # 5. Kockázatkezelés (Szoros SL, 1:3 RR)
         if trade_signal == "SHORT / SELL":
             sl = fvg_high * 1.002
             tp = entry_price - (abs(entry_price - sl) * 3.0)
@@ -183,14 +184,13 @@ def render_signal_block(display_name, res, unique_id):
     fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["sl"]]*length, name="SL", line=dict(color='#ff1744', width=1.5, dash='dash')))
     fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["tp"]]*length, name="TP", line=dict(color='#00e676', width=1.5)))
 
-    # Pontosan rajzolt FVG doboz
     if res["fvg_high"] > 0 and res["fvg_idx"] is not None:
         s_idx = int(res["fvg_idx"])
         e_idx = int(min(s_idx + 25, length - 1))
         bx = [df_ltf['time'].iloc[s_idx], df_ltf['time'].iloc[e_idx], df_ltf['time'].iloc[e_idx], df_ltf['time'].iloc[s_idx], df_ltf['time'].iloc[s_idx]]
         by = [res["fvg_high"], res["fvg_high"], res["fvg_low"], res["fvg_low"], res["fvg_high"]]
-        # Kiemelt színnel, hogy egyértelmű legyen, hol van
-        fig.add_trace(go.Scatter(x=bx, y=by, fill="toself", fillcolor="rgba(255, 214, 0, 0.15)", line=dict(color='#ffd600', width=1.5), showlegend=False))
+        # Visszateszt Zóna Kiemelése
+        fig.add_trace(go.Scatter(x=bx, y=by, fill="toself", fillcolor="rgba(41, 182, 246, 0.2)", line=dict(color='#29b6f6', width=2), showlegend=False))
 
     y_pad = (df_ltf['high'].max() - df_ltf['low'].min()) * 0.15
     fig.update_layout(template="plotly_dark", xaxis_rangeslider_visible=False, height=400, paper_bgcolor='#131722', plot_bgcolor='#131722', margin=dict(l=10, r=55, t=10, b=10), showlegend=False, yaxis=dict(side="right", range=[df_ltf['low'].min() - y_pad, max(df_ltf['high'].max(), res["htf_high"]) + y_pad], gridcolor="#2a2e39", zeroline=False, tickfont=dict(color="#848e9c", size=10)), xaxis=dict(gridcolor="#2a2e39", zeroline=False, tickfont=dict(color="#848e9c", size=10)))
@@ -206,7 +206,7 @@ if run_scanner:
     scan_placeholder = st.empty()
     for idx, pair in enumerate(filtered_symbols):
         display_name = str(pair).split(':')[0] if ':' in str(pair) else str(pair)
-        scan_placeholder.text(f"Piac átfésülése ({idx+1}/{len(filtered_symbols)}): {display_name} - Likviditás / iFVG keresése...")
+        scan_placeholder.text(f"Piac átfésülése ({idx+1}/{len(filtered_symbols)}): {display_name} - Friss Belépők Keresése...")
         res = analyze_pair(pair)
         if res: 
             render_signal_block(display_name, res, f"scan_mode_{idx}")
@@ -221,4 +221,4 @@ if not run_scanner:
     if manual_res: 
         render_signal_block(selected_pair, manual_res, "manual_mode")
     if not manual_res: 
-        st.info(f"A(z) {selected_pair} páron jelenleg nincs HTF Sweep -> Pontos iFVG Visszateszt setup.")
+        st.info(f"A(z) {selected_pair} páron jelenleg nincs azonnali belépő (A trade valószínűleg már elment, vagy nincs setup).")
