@@ -31,8 +31,9 @@ l15 = exch.fetch_ohlcv(selected_pair, timeframe='15m', limit=40)
 df_15 = pd.DataFrame(l15, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
 df_15['time'] = pd.to_datetime(df_15['time'], unit='ms')
 
-htf_high = float(df_htf['high'].max())
-htf_low = float(df_htf['low'].min())
+# Múltbeli likviditási szintek a sweep előtti időszakból
+htf_high = float(df_htf['high'].iloc[:-3].max())
+htf_low = float(df_htf['low'].iloc[:-3].min())
 current_price = float(df_15['close'].iloc[-1])
 
 high_low = df_15['high'] - df_15['low']
@@ -42,29 +43,26 @@ df_15['tr'] = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
 df_15['atr'] = df_15['tr'].rolling(window=14).mean()
 current_atr = df_15['atr'].iloc[-1] if pd.notna(df_15['atr'].iloc[-1]) else (current_price * 0.005)
 
-# BIZTONSÁGOS SWEEP GYERTYA FVG DETEKTÁLÁS (Pontosan a rajzod alapján)
+# Sweep gyertya környezetében lévő FVG meghatározása
 fvg_high, fvg_low, fvg_mid = 0.0, 0.0, 0.0
+sweep_idx = int(df_15['high'].idxmax())
 
-# Megkeressük a legnagyobb mozgást végző (sweep) gyertya indexét
-df_15['body_size'] = (df_15['close'] - df_15['open']).abs()
-sweep_idx = int(df_15['body_size'].idxmax())
-
-# Ellenőrizzük az FVG-t ennél a konkrét sweep gyertyánál
-if sweep_idx >= 1 and sweep_idx < len(df_15) - 1:
-    # Ha a sweep gyertya emelkedő (Zöld gyertya - SHORT előkészület)
-    if df_15['close'].iloc[sweep_idx] > df_15['open'].iloc[sweep_idx]:
-        fvg_high = float(df_15['low'].iloc[sweep_idx + 1]) if sweep_idx + 1 < len(df_15) else float(df_15['close'].iloc[sweep_idx])
-        fvg_low = float(df_15['high'].iloc[sweep_idx - 1])
-        # Biztonsági korrekció ha a kanócok összeérnének
-        if fvg_high < fvg_low:
-            fvg_high, fvg_low = float(df_15['high'].iloc[sweep_idx]), float(df_15['low'].iloc[sweep_idx])
-    # Ha a sweep gyertya eső (Piros gyertya - LONG előkészület)
-    else:
+if sweep_idx >= 2 and sweep_idx < len(df_15) - 1:
+    if df_15['low'].iloc[sweep_idx - 1] > df_15['high'].iloc[sweep_idx - 3]:
         fvg_high = float(df_15['low'].iloc[sweep_idx - 1])
-        fvg_low = float(df_15['high'].iloc[sweep_idx + 1]) if sweep_idx + 1 < len(df_15) else float(df_15['close'].iloc[sweep_idx])
-        if fvg_high < fvg_low:
-            fvg_high, fvg_low = float(df_15['high'].iloc[sweep_idx]), float(df_15['low'].iloc[sweep_idx])
+        fvg_low = float(df_15['high'].iloc[sweep_idx - 3])
+    elif df_15['low'].iloc[sweep_idx] > df_15['high'].iloc[sweep_idx + 1]:
+        fvg_high = float(df_15['low'].iloc[sweep_idx])
+        fvg_low = float(df_15['high'].iloc[sweep_idx + 1])
+    else:
+        fvg_high = float(df_15['low'].iloc[sweep_idx])
+        fvg_low = float(df_15['high'].iloc[sweep_idx - 2] if sweep_idx >= 2 else df_15['low'].iloc[sweep_idx])
 
+if fvg_high <= fvg_low:
+    fvg_high = float(df_15['high'].max()) * 0.995
+    fvg_low = float(df_15['high'].max()) * 0.985
+
+# Consequent Encroachment (A doboz pontos felezőpontja)
 fvg_mid = (fvg_high + fvg_low) / 2
 
 trade_signal = "VÁRAKOZÁS"
@@ -76,15 +74,16 @@ tp2 = htf_high
 was_sell_swept = (df_15['low'].min() <= htf_low) or (df_15['low'].iloc[-8:].min() <= htf_low)
 var_buy_swept = (df_15['high'].max() >= htf_high) or (df_15['high'].iloc[-8:].max() >= htf_high)
 
+# JAVÍTOTT STRATÉGIA: A belépő PONTOSAN a doboz KÖZEPE (fvg_mid) a rajzod alapján!
 if was_sell_swept and fvg_high > 0:
-    entry_price = fvg_high # LONG Belépő a doboz tetején
+    entry_price = fvg_mid # LONG Belépő a középvonalon
     sl = htf_low - (1.5 * current_atr)
     tp1 = entry_price + (abs(entry_price - sl) * 4.0)
     tp2 = max(htf_high, entry_price + (abs(entry_price - sl) * 6.0))
     if current_price <= entry_price * 1.005:
         trade_signal = "LONG / BUY"
 elif var_buy_swept and fvg_low > 0:
-    entry_price = fvg_low # SHORT Belépő a doboz alján (ahogy berajzoltad a sárga csíkkal!)
+    entry_price = fvg_mid # SHORT Belépő a középvonalon (Consequent Encroachment)
     sl = htf_high + (1.5 * current_atr)
     tp1 = entry_price - (abs(entry_price - sl) * 4.0)
     tp2 = min(htf_low, entry_price - (abs(entry_price - sl) * 6.0))
@@ -100,9 +99,12 @@ fig.add_trace(go.Scatter(x=df_15['time'], y=[htf_low]*len(df_15), name="HTF Low"
 if fvg_high > 0 and fvg_low > 0:
     fig.add_trace(go.Scatter(x=[df_15['time'].iloc[0], df_15['time'].iloc[-1]], y=[fvg_high, fvg_high], line=dict(color='#ffd600', width=1.5), showlegend=False))
     fig.add_trace(go.Scatter(x=[df_15['time'].iloc[0], df_15['time'].iloc[-1]], y=[fvg_low, fvg_low], line=dict(color='#ffd600', width=1.5), showlegend=False))
+    # A sárga szaggatott középvonal kirajzolása a dobozba
+    fig.add_trace(go.Scatter(x=[df_15['time'].iloc[0], df_15['time'].iloc[-1]], y=[fvg_mid, fvg_mid], line=dict(color='#ffd600', width=1, dash='dash'), showlegend=False))
     fig.add_hrect(y0=fvg_low, y1=fvg_high, fillcolor="rgba(255, 214, 0, 0.02)", line_width=0)
 
-fig.add_trace(go.Scatter(x=df_15['time'], y=[entry_price]*len(df_15), name="ENTRY", line=dict(color='#00b0ff', width=2)))
+# A ciánkék ENTRY vonal most már tökéletesen rásimul a sárga szaggatott középvonalra!
+fig.add_trace(go.Scatter(x=df_15['time'], y=[entry_price]*len(df_15), name="ENTRY (CE Visszateszt)", line=dict(color='#00b0ff', width=2.5)))
 fig.add_trace(go.Scatter(x=df_15['time'], y=[sl]*len(df_15), name="SL", line=dict(color='#ff1744', width=2)))
 fig.add_trace(go.Scatter(x=df_15['time'], y=[tp1]*len(df_15), name="TP1", line=dict(color='#00e676', width=2)))
 fig.add_trace(go.Scatter(x=df_15['time'], y=[tp2]*len(df_15), name="TP2", line=dict(color='#00c853', width=2)))
@@ -128,12 +130,12 @@ lev = max(1, min(int(0.8 / sl_dist), 10)) if sl_dist > 0 else 1
 margin = pos_size / lev
 
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("OPTIMÁLIS BELÉPŐ", f"${entry_price:,.4f}")
+c1.metric("OPTIMÁLIS BELÉPŐ (50%)", f"${entry_price:,.4f}")
 c2.metric("STOP LOSS (SL)", f"${sl:,.4f}")
 c3.metric("TAKE PROFIT 1", f"${tp1:,.4f}")
 c4.metric("TAKE PROFIT 2", f"${tp2:,.4f}")
 
-st.markdown("##### 📐 Kockázatkezelés & Méretezés:")
+st.markdown("##### 📐 Kockázatkezelés & Méretezés (50%-os CE szinthez):")
 cc1, cc2, cc3 = st.columns(3)
 cc1.metric("Javasolt Áttétel", f"{lev}x")
 cc2.metric("Pozíció Méret", f"${pos_size:,.2f}")
