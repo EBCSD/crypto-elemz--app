@@ -64,12 +64,12 @@ def get_active_markets():
 
 filtered_symbols = get_active_markets()
 
-# HAJSZÁLPONTOS INVERZ FVG MOTOR
+# INVERZ FVG LOGIKAI MOTOR
 def analyze_pair(pair_symbol):
     try:
         clean_symbol = pair_symbol.split(':') if ':' in pair_symbol else pair_symbol
 
-        # 1. HTF Szintek szinkronizálása
+        # HTF Lekérések (1h és 4h kombinált likviditás)
         htf_1h = exch.fetch_ohlcv(clean_symbol, timeframe='1h', limit=48)
         htf_4h = exch.fetch_ohlcv(clean_symbol, timeframe='4h', limit=24)
         if not htf_1h or not htf_4h: return None
@@ -80,7 +80,6 @@ def analyze_pair(pair_symbol):
         htf_high = max(float(df_1h['high'].iloc[:-2].max()), float(df_4h['high'].iloc[:-2].max()))
         htf_low = min(float(df_1h['low'].iloc[:-2].min()), float(df_4h['low'].iloc[:-2].min()))
 
-        # 2. LTF (15m / 5m) iFVG detektálás
         timeframes = ['15m', '5m']
         chosen_tf = '15m'
         df_ltf = pd.DataFrame()
@@ -97,7 +96,8 @@ def analyze_pair(pair_symbol):
             length = len(df_ltf)
 
             for i in range(2, length - 4):
-                if df_ltf['high'].iloc[i] < df_ltf['low'].iloc[i+2]: # Bearish iFVG alapja
+                # Bearish iFVG (Felfelé űr, amit letörtek)
+                if df_ltf['high'].iloc[i] < df_ltf['low'].iloc[i+2]:
                     o_fvg_high = float(df_ltf['low'].iloc[i+2])
                     o_fvg_low = float(df_ltf['high'].iloc[i])
                     
@@ -113,7 +113,8 @@ def analyze_pair(pair_symbol):
                         chosen_tf = tf
                         break
                 
-                elif df_ltf['low'].iloc[i] > df_ltf['high'].iloc[i+2]: # Bullish iFVG alapja
+                # Bullish iFVG (Lefelé űr, amit áttörtek felfelé)
+                elif df_ltf['low'].iloc[i] > df_ltf['high'].iloc[i+2]:
                     o_fvg_high = float(df_ltf['low'].iloc[i])
                     o_fvg_low = float(df_ltf['high'].iloc[i+2])
                     
@@ -153,9 +154,10 @@ def analyze_pair(pair_symbol):
     except:
         return None
 
-# --- ÚJ STRUKTÚRA: EGYEDI PÁR KERESŐ (AZONNALI, HIBAMENTES RENDELÉS) ---
+# --- EGYEDI PÁR KERESŐ ---
 st.subheader("🎯 Egyedi Kriptopár Keresése és Azonnali Elemzése")
-selected_pair = st.selectbox("Válassz ki vagy gépelj be egy párt (pl. LUMIA/USDT):", filtered_symbols, index=filtered_symbols.index("LUMIA/USDT") if "LUMIA/USDT" in filtered_symbols else 0)
+default_index = filtered_symbols.index("LUMIA/USDT") if "LUMIA/USDT" in filtered_symbols else 0
+selected_pair = st.selectbox("Válassz ki egy párt a listából:", filtered_symbols, index=default_index)
 
 res = analyze_pair(selected_pair)
 
@@ -212,3 +214,4 @@ if res:
         </div>
     """, unsafe_allow_html=True)
 else:
+
