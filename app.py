@@ -11,7 +11,6 @@ st.sidebar.header("🎛️ Vezérlőpult")
 exchange_id = st.sidebar.selectbox("1. Válassz Tőzsdét:", ["bitget", "binance", "bybit", "okx"])
 market_type = st.sidebar.radio("2. Kereskedési mód:", ["Futures", "Spot", "Margin"])
 
-# Új funkció: Automata teljes piacszűrő kapcsoló
 st.sidebar.markdown("---")
 st.sidebar.subheader("🔍 Piacszűrés Beállításai")
 scan_all_pairs = st.sidebar.checkbox("Minden pár automata szűrése", value=False)
@@ -79,13 +78,11 @@ try:
     else:
         filtered_symbols = [s for s in all_symbols if exch.markets[s].get('spot')]
 
-    # SZŰRŐ MÓD: Végigpörgeti az összes párt automatikusan
     if scan_all_pairs:
         st.markdown("### ⚡ **Élő ICT Piacszűrő futása...**")
         st.write("A szoftver automatikusan elemzi a párokat. Csak az érvényes jelzések fognak megjelenni:")
         
         active_trades_found = 0
-        # Mobil teljesítmény miatt az első 25 legaktívabb pár vizsgálata (gyorsaság érdekében)
         symbols_to_scan = filtered_symbols[:25] 
         
         progress_bar = st.progress(0)
@@ -121,7 +118,6 @@ try:
         if active_trades_found == 0:
             st.info("⏳ A piac fésülése kész. Jelenleg egyetlen páron sincs aktív 1H sweep + 15M Inverse FVG megerősítés. Várunk a setupokra.")
 
-    # MANUÁLIS MÓD: Egy kiválasztott coin részletes elemzése és grafikonja
     else:
         selected_pair = st.selectbox("2. Válassz ki egy kriptopárt az elemzéshez:", filtered_symbols if filtered_symbols else ["Nincs adat"])
 
@@ -145,9 +141,9 @@ try:
             fig.add_trace(go.Scatter(x=df_ltf['time'], y=[htf_low]*len(df_ltf), name="HTF Low", line=dict(color='#00e676', width=1.5)))
 
             if fvg_high > 0 and fvg_low > 0:
-                fig.add_trace(go.Scatter(x=[df_ltf['time'].iloc[0], df_ltf['time'].iloc[-1]], y=[fvg_high, fvg_high], line=dict(color='#ffd600', width=2), showlegend=False))
-                fig.add_trace(go.Scatter(x=[df_ltf['time'].iloc[0], df_ltf['time'].iloc[-1]], y=[fvg_low, fvg_low], line=dict(color='#ffd600', width=2), showlegend=False))
-                fig.add_trace(go.Scatter(x=[df_ltf['time'].iloc[0], df_ltf['time'].iloc[-1]], y=[fvg_mid, fvg_mid], line=dict(color='#ffd600', width=1, dash='dash'), showlegend=False))
+                fig.add_trace(go.Scatter(x=[df_ltf['time'].iloc, df_ltf['time'].iloc[-1]], y=[fvg_high, fvg_high], line=dict(color='#ffd600', width=2), showlegend=False))
+                fig.add_trace(go.Scatter(x=[df_ltf['time'].iloc, df_ltf['time'].iloc[-1]], y=[fvg_low, fvg_low], line=dict(color='#ffd600', width=2), showlegend=False))
+                fig.add_trace(go.Scatter(x=[df_ltf['time'].iloc, df_ltf['time'].iloc[-1]], y=[fvg_mid, fvg_mid], line=dict(color='#ffd600', width=1, dash='dash'), showlegend=False))
                 fig.add_hrect(y0=fvg_low, y1=fvg_high, fillcolor="rgba(255, 214, 0, 0.05)", line_width=0)
 
             if signal != "VÁRAKOZÁS":
@@ -166,3 +162,10 @@ try:
             )
             st.plotly_chart(fig, use_container_width=True)
 
+            st.markdown("---")
+            st.subheader("🎯 Automatizált Kereskedési Javaslat")
+            if signal != "VÁRAKOZÁS":
+                st.success(f"🔥 **JELZÉS:** {signal}")
+                sl_dist_pct = abs(entry_price - stop_loss) / entry_price
+                max_loss_usd = total_balance * (risk_percent / 100)
+                position_size_usd = max_loss_usd / sl_dist_pct
