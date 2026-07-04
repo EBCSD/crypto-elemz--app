@@ -43,9 +43,39 @@ df_15['tr'] = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
 df_15['atr'] = df_15['tr'].rolling(window=14).mean()
 current_atr = df_15['atr'].iloc[-1] if pd.notna(df_15['atr'].iloc[-1]) else (current_price * 0.005)
 
-fvg_high = float(df_15['low'].iloc[-3])
-fvg_low = float(df_15['high'].iloc[-5])
-fvg_mid = (fvg_high + fvg_low) / 2
+# ÚJ SWEEP-KÖZPONTÚ FVG SCANNER (Hajszálpontosan a sweep gyertya környezetében keres)
+fvg_high, fvg_low, fvg_mid = 0.0, 0.0, 0.0
+highest_candle_idx = int(df_15['high'].idxmax())
+
+# Megvizsgáljuk a sweep csúcsa körüli szűk tartományt (maximum 4 gyertyát visszafele a csúcstól)
+for i in range(highest_candle_idx + 2, highest_candle_idx - 3, -1):
+    if i < len(df_15) and i >= 2:
+        # SHORT HOZ: Bikás gyertyák rése, amit a sweep után letörünk
+        if df_15['low'].iloc[i-2] > df_15['high'].iloc[i]:
+            fvg_high = float(df_15['low'].iloc[i-2])
+            fvg_low = float(df_15['high'].iloc[i])
+            fvg_mid = (fvg_high + fvg_low) / 2
+            break
+        # LONG HOZ: Medvés gyertyák rése, amit a sweep után áttörünk felfelé
+        elif df_15['high'].iloc[i-2] < df_15['low'].iloc[i]:
+            fvg_high = float(df_15['low'].iloc[i])
+            fvg_low = float(df_15['high'].iloc[i-2])
+            fvg_mid = (fvg_high + fvg_low) / 2
+            break
+
+# Ha a csúcs környezetében nem volt tiszta rés, biztonsági féknek az utolsó FVG-t vesszük
+if fvg_high == 0:
+    for i in range(len(df_15)-1, 2, -1):
+        if df_15['low'].iloc[i-2] > df_15['high'].iloc[i]:
+            fvg_high = float(df_15['low'].iloc[i-2])
+            fvg_low = float(df_15['high'].iloc[i])
+            fvg_mid = (fvg_high + fvg_low) / 2
+            break
+        elif df_15['high'].iloc[i-2] < df_15['low'].iloc[i]:
+            fvg_high = float(df_15['low'].iloc[i])
+            fvg_low = float(df_15['high'].iloc[i-2])
+            fvg_mid = (fvg_high + fvg_low) / 2
+            break
 
 sl = htf_low - (1.5 * current_atr)
 tp1 = current_price + (abs(current_price - sl) * 4.0)
@@ -55,10 +85,12 @@ fig = go.Figure()
 fig.add_trace(go.Candlestick(x=df_15['time'], open=df_15['open'], high=df_15['high'], low=df_15['low'], close=df_15['close'], name="15M", increasing_line_color='#089981', decreasing_line_color='#f23645', increasing_fillcolor='#089981', decreasing_fillcolor='#f23645'))
 fig.add_trace(go.Scatter(x=df_15['time'], y=[htf_high]*len(df_15), name="HTF High", line=dict(color='#00e676', width=1.5)))
 fig.add_trace(go.Scatter(x=df_15['time'], y=[htf_low]*len(df_15), name="HTF Low", line=dict(color='#00e676', width=1.5)))
-fig.add_trace(go.Scatter(x=[df_15['time'].iloc[0], df_15['time'].iloc[-1]], y=[fvg_high, fvg_high], line=dict(color='#ffd600', width=2), showlegend=False))
-fig.add_trace(go.Scatter(x=[df_15['time'].iloc[0], df_15['time'].iloc[-1]], y=[fvg_low, fvg_low], line=dict(color='#ffd600', width=2), showlegend=False))
-fig.add_trace(go.Scatter(x=[df_15['time'].iloc[0], df_15['time'].iloc[-1]], y=[fvg_mid, fvg_mid], line=dict(color='#ffd600', width=1, dash='dash'), showlegend=False))
-fig.add_hrect(y0=fvg_low, y1=fvg_high, fillcolor="rgba(255, 214, 0, 0.03)", line_width=0)
+
+if fvg_high > 0 and fvg_low > 0:
+    fig.add_trace(go.Scatter(x=[df_15['time'].iloc[0], df_15['time'].iloc[-1]], y=[fvg_high, fvg_high], line=dict(color='#ffd600', width=2), showlegend=False))
+    fig.add_trace(go.Scatter(x=[df_15['time'].iloc[0], df_15['time'].iloc[-1]], y=[fvg_low, fvg_low], line=dict(color='#ffd600', width=2), showlegend=False))
+    fig.add_trace(go.Scatter(x=[df_15['time'].iloc[0], df_15['time'].iloc[-1]], y=[fvg_mid, fvg_mid], line=dict(color='#ffd600', width=1, dash='dash'), showlegend=False))
+    fig.add_hrect(y0=fvg_low, y1=fvg_high, fillcolor="rgba(255, 214, 0, 0.03)", line_width=0)
 
 fig.add_trace(go.Scatter(x=df_15['time'], y=[current_price]*len(df_15), name="ENTRY", line=dict(color='#00b0ff', width=2.5)))
 fig.add_trace(go.Scatter(x=df_15['time'], y=[sl]*len(df_15), name="SL", line=dict(color='#ff1744', width=2.5)))
@@ -94,5 +126,5 @@ cc3.metric("Szükséges Margin", f"${margin:,.2f}")
 
 st.markdown("---")
 st.markdown("### 🔍 Minden Pár Élő Automata Szűrése")
-st.write("Kattints az alábbi gombra az összes Bitget pár élő szűréséhez (RSI, trendek, volumen alapján):")
+st.write("Kattints az alábbi gombra az összes Bitget pár élő szűréséhez:")
 st.link_button("📈 Élő Bitget Piacszűrő Megnyitása", "https://tradingview.com", use_container_width=True)
