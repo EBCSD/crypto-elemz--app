@@ -42,34 +42,30 @@ df_15['tr'] = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
 df_15['atr'] = df_15['tr'].rolling(window=14).mean()
 current_atr = df_15['atr'].iloc[-1] if pd.notna(df_15['atr'].iloc[-1]) else (current_price * 0.005)
 
+# BIZTONSÁGOS SWEEP GYERTYA FVG DETEKTÁLÁS (Pontosan a rajzod alapján)
 fvg_high, fvg_low, fvg_mid = 0.0, 0.0, 0.0
-highest_candle_idx = int(df_15['high'].idxmax())
 
-for i in range(highest_candle_idx + 2, highest_candle_idx - 3, -1):
-    if i < len(df_15) and i >= 2:
-        if df_15['low'].iloc[i-2] > df_15['high'].iloc[i]:
-            fvg_high = float(df_15['low'].iloc[i-2])
-            fvg_low = float(df_15['high'].iloc[i])
-            fvg_mid = (fvg_high + fvg_low) / 2
-            break
-        elif df_15['high'].iloc[i-2] < df_15['low'].iloc[i]:
-            fvg_high = float(df_15['low'].iloc[i])
-            fvg_low = float(df_15['high'].iloc[i-2])
-            fvg_mid = (fvg_high + fvg_low) / 2
-            break
+# Megkeressük a legnagyobb mozgást végző (sweep) gyertya indexét
+df_15['body_size'] = (df_15['close'] - df_15['open']).abs()
+sweep_idx = int(df_15['body_size'].idxmax())
 
-if fvg_high == 0:
-    for i in range(len(df_15)-1, 2, -1):
-        if df_15['low'].iloc[i-2] > df_15['high'].iloc[i]:
-            fvg_high = float(df_15['low'].iloc[i-2])
-            fvg_low = float(df_15['high'].iloc[i])
-            fvg_mid = (fvg_high + fvg_low) / 2
-            break
-        elif df_15['high'].iloc[i-2] < df_15['low'].iloc[i]:
-            fvg_high = float(df_15['low'].iloc[i])
-            fvg_low = float(df_15['high'].iloc[i-2])
-            fvg_mid = (fvg_high + fvg_low) / 2
-            break
+# Ellenőrizzük az FVG-t ennél a konkrét sweep gyertyánál
+if sweep_idx >= 1 and sweep_idx < len(df_15) - 1:
+    # Ha a sweep gyertya emelkedő (Zöld gyertya - SHORT előkészület)
+    if df_15['close'].iloc[sweep_idx] > df_15['open'].iloc[sweep_idx]:
+        fvg_high = float(df_15['low'].iloc[sweep_idx + 1]) if sweep_idx + 1 < len(df_15) else float(df_15['close'].iloc[sweep_idx])
+        fvg_low = float(df_15['high'].iloc[sweep_idx - 1])
+        # Biztonsági korrekció ha a kanócok összeérnének
+        if fvg_high < fvg_low:
+            fvg_high, fvg_low = float(df_15['high'].iloc[sweep_idx]), float(df_15['low'].iloc[sweep_idx])
+    # Ha a sweep gyertya eső (Piros gyertya - LONG előkészület)
+    else:
+        fvg_high = float(df_15['low'].iloc[sweep_idx - 1])
+        fvg_low = float(df_15['high'].iloc[sweep_idx + 1]) if sweep_idx + 1 < len(df_15) else float(df_15['close'].iloc[sweep_idx])
+        if fvg_high < fvg_low:
+            fvg_high, fvg_low = float(df_15['high'].iloc[sweep_idx]), float(df_15['low'].iloc[sweep_idx])
+
+fvg_mid = (fvg_high + fvg_low) / 2
 
 trade_signal = "VÁRAKOZÁS"
 entry_price = current_price
@@ -81,14 +77,14 @@ was_sell_swept = (df_15['low'].min() <= htf_low) or (df_15['low'].iloc[-8:].min(
 var_buy_swept = (df_15['high'].max() >= htf_high) or (df_15['high'].iloc[-8:].max() >= htf_high)
 
 if was_sell_swept and fvg_high > 0:
-    entry_price = fvg_high
+    entry_price = fvg_high # LONG Belépő a doboz tetején
     sl = htf_low - (1.5 * current_atr)
     tp1 = entry_price + (abs(entry_price - sl) * 4.0)
     tp2 = max(htf_high, entry_price + (abs(entry_price - sl) * 6.0))
     if current_price <= entry_price * 1.005:
         trade_signal = "LONG / BUY"
 elif var_buy_swept and fvg_low > 0:
-    entry_price = fvg_low
+    entry_price = fvg_low # SHORT Belépő a doboz alján (ahogy berajzoltad a sárga csíkkal!)
     sl = htf_high + (1.5 * current_atr)
     tp1 = entry_price - (abs(entry_price - sl) * 4.0)
     tp2 = min(htf_low, entry_price - (abs(entry_price - sl) * 6.0))
@@ -112,17 +108,13 @@ fig.add_trace(go.Scatter(x=df_15['time'], y=[tp1]*len(df_15), name="TP1", line=d
 fig.add_trace(go.Scatter(x=df_15['time'], y=[tp2]*len(df_15), name="TP2", line=dict(color='#00c853', width=2)))
 
 buffer = (df_15['high'].max() - df_15['low'].min()) * 0.15
-y_min = min(df_15['low'].min(), htf_low, sl) - buffer
-y_max = max(df_15['high'].max(), htf_high, sl) + buffer
+y_min = min(df_15['low'].min(), htf_low, sl, fvg_low) - buffer
+y_max = max(df_15['high'].max(), htf_high, sl, fvg_high) + buffer
 
 fig.update_layout(
-    template="plotly_dark",
-    xaxis_rangeslider_visible=False,
-    height=480,
-    margin=dict(l=10, r=65, t=10, b=10),
+    template="plotly_dark", xaxis_rangeslider_visible=False, height=480, margin=dict(l=10, r=65, t=10, b=10),
     yaxis=dict(range=[y_min, y_max], fixedrange=False, side="right", gridcolor="#1e293b", zeroline=False, tickfont=dict(size=11, color="#64748b")),
-    xaxis=dict(gridcolor="#1e293b", zeroline=False, tickfont=dict(color="#64748b")),
-    showlegend=False
+    xaxis=dict(gridcolor="#1e293b", zeroline=False, tickfont=dict(color="#64748b")), showlegend=False
 )
 st.plotly_chart(fig, use_container_width=True)
 
