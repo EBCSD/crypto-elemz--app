@@ -4,8 +4,24 @@ import pandas as pd
 import ccxt
 import plotly.graph_objects as go
 
-st.set_page_config(page_title="ICT Bot", layout="wide", initial_sidebar_state="collapsed")
-st.title("🏹 ICT Liquidity Sweep & IFVG Automata Elemző")
+# Ultramodern, letisztult UI konfiguráció
+st.set_page_config(page_title="ALGO ICT PRO", layout="wide", initial_sidebar_state="collapsed")
+
+# Modern dizájn injektálása: sötét tónusok, minimalizmus, neon kék részletek
+st.markdown("""
+    <style>
+    .main { background-color: #080b10; color: #e2e8f0; }
+    h1 { font-family: 'Inter', sans-serif; font-size: 26px !important; font-weight: 800 !important; color: #00b0ff !important; letter-spacing: -0.5px; margin-bottom: 5px !important; }
+    div[data-testid="stExpander"] { background-color: #111622 !important; border: 1px solid #1e293b !important; border-radius: 8px !important; }
+    .stProgress > div > div > div > div { background-image: linear-gradient(to right, #00b0ff, #00e676) !important; }
+    div[data-testid="stNotification"] { background-color: #111622 !important; border: 1px solid #1e293b !important; border-radius: 8px !important; color: #94a3b8 !important; }
+    div.block-container { padding-top: 1.5rem !important; padding-bottom: 1rem !important; }
+    </style>
+""", unsafe_allow_code=True)
+
+# Új, letisztult, professzionális név és alcím
+st.title("⚡ ALGO ICT PRO")
+st.caption("Institutional Liquidity Sweep & Inversion FVG Terminal")
 
 st.sidebar.header("🎛️ Vezérlőpult")
 exchange_id = st.sidebar.selectbox("1. Válassz Tőzsdét:", ["bitget", "binance", "bybit", "okx"])
@@ -33,17 +49,16 @@ def calc_atr(df):
     val = df['atr'].iloc[-1]
     return val if pd.notna(val) else (df['close'].iloc[-1] * 0.005)
 
-# BIZTONSÁGOS FVG KERESŐ FUNKCIÓ (A legfrissebbtől lépked visszafelé)
 def find_latest_fvg(df):
     f_high, f_low, f_mid = 0.0, 0.0, 0.0
     for i in range(len(df)-1, 2, -1):
-        if df['high'].iloc[i-2] < df['low'].iloc[i]: # Medvés FVG
+        if df['high'].iloc[i-2] < df['low'].iloc[i]:
             f_high, f_low = df['low'].iloc[i], df['high'].iloc[i-2]
             f_mid = (f_high + f_low) / 2
             return f_high, f_low, f_mid
-        elif df['low'].iloc[i-2] > df['high'].iloc[i]: # Bikás FVG
+        elif df['low'].iloc[i-2] > df['high'].iloc[i]:
             f_high, f_low = df['low'].iloc[i-2], df['high'].iloc[i]
-            f_mid = (f_high + fvg_low) / 2
+            f_mid = (f_high + f_low) / 2
             return f_high, f_low, f_mid
     return 0.0, 0.0, 0.0
 
@@ -51,12 +66,10 @@ def analyze_strategy(df_htf, df_15m, df_5m):
     htf_high = df_htf['high'].max()
     htf_low = df_htf['low'].min()
     
-    # Alapértelmezetten a 15M idősíkkal kezdünk
     df_ltf = df_15m
     timeframe_used = "15M"
     fvg_high, fvg_low, fvg_mid = find_latest_fvg(df_15m)
     
-    # 5M IDŐSÍK AUTOMATA MEGVÁLASZTÁSA: Ha a 15 percesen nincs tiszta FVG zóna
     if fvg_high == 0:
         df_ltf = df_5m
         timeframe_used = "5M"
@@ -70,16 +83,15 @@ def analyze_strategy(df_htf, df_15m, df_5m):
     was_sell_swept = (df_ltf['low'].min() <= htf_low) or (df_ltf['low'].iloc[-8:].min() <= htf_low)
     was_buy_swept = (df_ltf['high'].max() >= htf_high) or (df_ltf['high'].iloc[-8:].max() >= htf_high)
     
-    # STRATÉGIA: Sweep megvolt + a gyertya az IFVG zónán TÚL zárt be (Inverzió)
     if was_sell_swept and fvg_high > 0 and current_price > fvg_high and current_price > current_ema20:
         sl = htf_low - (1.5 * current_atr)
-        tp1 = current_price + (abs(current_price - sl) * 4.0) # Szigorú 1:4 megtérülés
+        tp1 = current_price + (abs(current_price - sl) * 4.0)
         tp2 = max(htf_high, current_price + (abs(current_price - sl) * 6.0))
         return "LONG / BUY", current_price, sl, tp1, tp2, fvg_high, fvg_low, fvg_mid, htf_high, htf_low, timeframe_used, df_ltf
         
     elif was_buy_swept and fvg_low > 0 and current_price < fvg_low and current_price < current_ema20:
         sl = htf_high + (1.5 * current_atr)
-        tp1 = current_price - (abs(current_price - sl) * 4.0) # Szigorú 1:4 megtérülés
+        tp1 = current_price - (abs(current_price - sl) * 4.0)
         tp2 = min(htf_low, current_price - (abs(current_price - sl) * 6.0))
         return "SHORT / SELL", current_price, sl, tp1, tp2, fvg_high, fvg_low, fvg_mid, htf_high, htf_low, timeframe_used, df_ltf
         
@@ -92,13 +104,12 @@ def draw_chart(df_plot, htf_high, htf_low, fvg_high, fvg_low, fvg_mid, signal, c
     fig.add_trace(go.Scatter(x=df_plot['time'], y=[htf_low]*len(df_plot), name="HTF Low", line=dict(color='#00e676', width=1.5)))
     
     if fvg_high > 0 and fvg_low > 0:
-        fig.add_trace(go.Scatter(x=[df_plot['time'].iloc[0], df_plot['time'].iloc[-1]], y=[fvg_high, fvg_high], line=dict(color='#ffd600', width=2), showlegend=False))
-        fig.add_trace(go.Scatter(x=[df_plot['time'].iloc[0], df_plot['time'].iloc[-1]], y=[fvg_low, fvg_low], line=dict(color='#ffd600', width=2), showlegend=False))
-        fig.add_trace(go.Scatter(x=[df_plot['time'].iloc[0], df_plot['time'].iloc[-1]], y=[fvg_mid, fvg_mid], line=dict(color='#ffd600', width=1, dash='dash'), showlegend=False))
+        fig.add_trace(go.Scatter(x=[df_plot['time'].iloc, df_plot['time'].iloc[-1]], y=[fvg_high, fvg_high], line=dict(color='#ffd600', width=2), showlegend=False))
+        fig.add_trace(go.Scatter(x=[df_plot['time'].iloc, df_plot['time'].iloc[-1]], y=[fvg_low, fvg_low], line=dict(color='#ffd600', width=2), showlegend=False))
+        fig.add_trace(go.Scatter(x=[df_plot['time'].iloc, df_plot['time'].iloc[-1]], y=[fvg_mid, fvg_mid], line=dict(color='#ffd600', width=1, dash='dash'), showlegend=False))
         fig.add_hrect(y0=fvg_low, y1=fvg_high, fillcolor="rgba(255, 214, 0, 0.03)", line_width=0)
         
     if signal != "VÁRAKOZÁS":
-        # A belépőt pontosan az IFVG törési szélére rajzolja a ciánkék vonal!
         fig.add_trace(go.Scatter(x=df_plot['time'], y=[fvg_low if signal == "SHORT / SELL" else fvg_high]*len(df_plot), name="ENTRY", line=dict(color='#00b0ff', width=2.5)))
         fig.add_trace(go.Scatter(x=df_plot['time'], y=[sl]*len(df_plot), name="SL", line=dict(color='#ff1744', width=2.5)))
         fig.add_trace(go.Scatter(x=df_plot['time'], y=[tp1]*len(df_plot), name="TP1", line=dict(color='#00e676', width=2.5)))
@@ -107,7 +118,7 @@ def draw_chart(df_plot, htf_high, htf_low, fvg_high, fvg_low, fvg_mid, signal, c
     buffer = (df_plot['high'].max() - df_plot['low'].min()) * 0.15
     y_min = min(df_plot['low'].min(), sl if signal != "VÁRAKOZÁS" else htf_low) - buffer
     y_max = max(df_plot['high'].max(), sl if signal != "VÁRAKOZÁS" else htf_high) + buffer
-    fig.update_layout(template="plotly_dark", xaxis_rangeslider_visible=False, height=460, margin=dict(l=10, r=60, t=10, b=10), yaxis=dict(range=[y_min, y_max], fixedrange=False, side="right", gridcolor="#212529", tickfont=dict(size=12)), xaxis=dict(gridcolor="#212529"), showlegend=False)
+    fig.update_layout(template="plotly_dark", xaxis_rangeslider_visible=False, height=440, margin=dict(l=10, r=60, t=10, b=10), yaxis=dict(range=[y_min, y_max], fixedrange=False, side="right", gridcolor="#1e293b", tickfont=dict(size=12, color="#94a3b8")), xaxis=dict(gridcolor="#1e293b", tickfont=dict(color="#94a3b8")), showlegend=False)
     st.plotly_chart(fig, use_container_width=True)
 
 def show_metrics(entry, sl, tp1, tp2, bal, risk):
@@ -118,14 +129,14 @@ def show_metrics(entry, sl, tp1, tp2, bal, risk):
     margin = pos_size / lev
     
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("BELÉPŐ (Struktúra)", f"${entry:,.6f}")
-    c2.metric("STOP LOSS (SL)", f"${sl:,.6f}")
-    c3.metric("TAKE PROFIT 1 (1:4)", f"${tp1:,.4f}")
-    c4.metric("TAKE PROFIT 2 (Max)", f"${tp2:,.4f}")
-    st.markdown("##### 📐 Pozíció és Áttétel javaslat:")
+    c1.metric("BELÉPŐ", f"${entry:,.6f}")
+    c2.metric("STOP LOSS", f"${sl:,.6f}")
+    c3.metric("TAKE PROFIT 1", f"${tp1:,.4f}")
+    c4.metric("TAKE PROFIT 2", f"${tp2:,.4f}")
+    st.markdown("##### 📐 Kockázatkezelés & Méretezés:")
     cc1, cc2, cc3 = st.columns(3)
-    cc1.metric("Javasolt Tőkeáttétel", f"{lev}x")
-    cc2.metric("Megnyitandó méret", f"${pos_size:,.2f}")
+    cc1.metric("Javasolt Áttétel", f"{lev}x")
+    cc2.metric("Pozíció Méret", f"${pos_size:,.2f}")
     cc3.metric("Szükséges Margin", f"${margin:,.2f}")
 
 exch = init_exchange(exchange_id)
@@ -140,9 +151,9 @@ else:
     filtered_symbols = [s for s in all_symbols if exch.markets[s].get('spot')]
 
 if scan_all_pairs:
-    st.markdown("### ⚡ **Élő Dual-Timeframe ICT Piacszűrő futása...**")
+    st.markdown("### ⚡ **Élő Piacszűrés...**")
     active_trades_found = 0
-    symbols_to_scan = filtered_symbols[:25]
+    symbols_to_scan = filtered_symbols[:50]
     progress_bar = st.progress(0)
     
     for index, sym in enumerate(symbols_to_scan):
@@ -162,17 +173,5 @@ if scan_all_pairs:
             
             if signal != "VÁRAKOZÁS":
                 active_trades_found += 1
-                with st.expander(f"🔥 {sym} - JELZÉS: {signal} ({tf_used} idősíkon!)", expanded=True):
+                with st.expander(f"🔥 {sym} - {signal} ({tf_used})", expanded=True):
                     draw_chart(df_active, h_h, h_l, f_h, f_l, f_m, signal, entry, sl, tp1, tp2, tf_used)
-                    show_metrics(entry, sl, tp1, tp2, total_balance, risk_percent)
-        except:
-            continue
-        progress_bar.progress((index + 1) / len(symbols_to_scan))
-    if active_trades_found == 0:
-        st.info("⏳ Inaktivitás. Egyetlen páron sincs aktív 15M vagy 5M Inverse FVG fordulat.")
-        
-else:
-    selected_pair = st.selectbox("2. Válassz ki egy kriptopárt az elemzéshez:", filtered_symbols if filtered_symbols else ["Nincs adat"])
-    if selected_pair and selected_pair != "Nincs adat":
-        st.markdown(f"### 🔍 **{selected_pair.upper()}** Részletes ICT Elemzése...")
-        htf_ohlcv = exch.fetch_ohlcv(selected_pair, timeframe='1h', limit=48)
