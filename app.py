@@ -1,4 +1,4 @@
-# Kesz_Alkalmazas_Folyamatos_Lista_Sotet_Design
+# Kesz_Alkalmazas_Stabil_Folyamatos_Lista
 import streamlit as st
 import pandas as pd
 import ccxt
@@ -14,7 +14,6 @@ st.markdown("""
     [data-testid="stMetricValue"] { font-size: 20px !important; color: #00b0ff !important; font-weight: bold; }
     h1, h2, h3, p, span, caption { color: #d1d4dc !important; }
     div[data-testid="stVerticalBlock"] { background-color: #131722; }
-    /* Egyedi kártya a szignáloknak egymás alatt */
     .signal-card { 
         background-color: #1c2030; 
         padding: 15px; 
@@ -146,7 +145,7 @@ def analyze_pair(pair_symbol):
     except:
         return None
 
-# --- AZ ÚJ FOLYAMATOS, EGYMÁS ALÁ LISTÁZÓ MEGJELENÍTÉS ---
+# --- FOLYAMATOS EGYMÁS ALÁ LISTÁZÓ MEGJELENÍTÉS ---
 st.subheader("🕵️‍♂️ Élő Találatok és Elemzések Folyamatos Listája")
 scan_depth = st.slider("Átvizsgálandó top aktív párok száma:", min_value=10, max_value=100, value=40, step=10)
 
@@ -163,19 +162,16 @@ if st.button("🔄 Piac Pásztázása és Grafikonok Generálása", use_containe
         
         res = analyze_pair(pair)
         
-        # Csak akkor listázzuk ki, ha van szabályos ICT Setupunk!
         if res and "VÁRAKOZÁS" not in res["trade_signal"]:
             found_any = True
             df_ltf = res["df_ltf"]
             
-            # Minden találat egy szép sötét dobozba (Card) kerül egymás alá
             st.markdown(f"""
                 <div class="signal-card">
                     <h3 style='margin:0;'>🔥 {pair} &nbsp;|&nbsp; Idősík: {res['chosen_tf']} &nbsp;|&nbsp; Irány: {res['trade_signal']}</h3>
                 </div>
             """, unsafe_allow_html=True)
             
-            # Élő TradingView-szerű grafikon felépítése az adott talált párhoz
             fig = go.Figure()
             
             fig.add_trace(go.Candlestick(
@@ -184,11 +180,11 @@ if st.button("🔄 Piac Pásztázása és Grafikonok Generálása", use_containe
                 increasing_fillcolor='#089981', decreasing_fillcolor='#f23645', name="Ár"
             ))
             
-            # HTF szintek
+            # HTF szintek előrevetítése
             fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["htf_high"]]*len(df_ltf), name="HTF Liq High", line=dict(color='#26a69a', width=1.5)))
             fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["htf_low"]]*len(df_ltf), name="HTF Liq Low", line=dict(color='#ef5350', width=1.5)))
 
-            # Sárga FVG téglalap és lila szaggatott CE középvonal rajzolása
+            # Sárga FVG téglalap és lila szaggatott CE középvonal rajzolása (HIBA JAVÍTVA: iloc[0] és iloc[-1] pontosan lezárva)
             if res["fvg_high"] > 0 and res["fvg_start_idx"] is not None:
                 s_idx = res["fvg_start_idx"]
                 e_idx = min(s_idx + 10, len(df_ltf) - 1)
@@ -199,7 +195,7 @@ if st.button("🔄 Piac Pásztázása és Grafikonok Generálása", use_containe
                 fig.add_trace(go.Scatter(x=bx, y=by, fill="toself", fillcolor="rgba(255, 214, 0, 0.05)", line=dict(color='#ffd600', width=1.5), showlegend=False))
                 fig.add_trace(go.Scatter(x=[df_ltf['time'].iloc[s_idx], df_ltf['time'].iloc[e_idx]], y=[res["fvg_mid"], res["fvg_mid"]], line=dict(color='#e040fb', width=1.5, dash='dash'), name="CE 50%"))
 
-            # Kereskedési célárak berajzolása a chartra
+            # Kereskedési szintek berajzolása a chartra
             fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["entry_price"]]*len(df_ltf), name="Belépő", line=dict(color='#29b6f6', width=2)))
             fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["sl"]]*len(df_ltf), name="SL", line=dict(color='#ff1744', width=1.5, dash='dash')))
             fig.add_trace(go.Scatter(x=df_ltf['time'], y=[res["tp"]]*len(df_ltf), name="TP", line=dict(color='#00e676', width=1.5)))
@@ -208,3 +204,6 @@ if st.button("🔄 Piac Pásztázása és Grafikonok Generálása", use_containe
                 template="plotly_dark", xaxis_rangeslider_visible=False, height=380,
                 paper_bgcolor='#131722', plot_bgcolor='#131722', margin=dict(l=10, r=55, t=10, b=10),
                 showlegend=False,
+                yaxis=dict(side="right", gridcolor="#2a2e39", zeroline=False, tickfont=dict(color="#848e9c", size=10)),
+                xaxis=dict(gridcolor="#2a2e39", zeroline=False, tickfont=dict(color="#848e9c", size=10))
+            )
