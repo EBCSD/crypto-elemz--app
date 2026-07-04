@@ -4,7 +4,7 @@ import ccxt
 import plotly.graph_objects as go
 import time
 
-# 1. ALAPBEÁLLÍTÁSOK (A Problémás stílusblokk teljesen törölve)
+# 1. ALAPBEÁLLÍTÁSOK (Dizájn és stílusblokk teljesen törölve a hibák elkerülésére)
 st.set_page_config(page_title="ALGO ICT PRO", layout="wide", initial_sidebar_state="collapsed")
 
 st.title("⚡ ALGO ICT PRO V2")
@@ -52,7 +52,8 @@ def analyze_pair(pair_symbol):
         # HTF lekérése (1h és 4h kombinált likviditás)
         htf_1h = exch.fetch_ohlcv(clean_symbol, timeframe='1h', limit=48)
         htf_4h = exch.fetch_ohlcv(clean_symbol, timeframe='4h', limit=24)
-        if not htf_1h or not htf_4h: return None
+        if not htf_1h or not htf_4h: 
+            return None
         
         df_1h = pd.DataFrame(htf_1h, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
         df_4h = pd.DataFrame(htf_4h, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
@@ -70,12 +71,12 @@ def analyze_pair(pair_symbol):
 
         for tf in timeframes:
             ltf_ohlcv = exch.fetch_ohlcv(clean_symbol, timeframe=tf, limit=40)
-            if not ltf_ohlcv: continue
+            if not ltf_ohlcv: 
+                continue
             df_ltf = pd.DataFrame(ltf_ohlcv, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
             df_ltf['time'] = pd.to_datetime(df_ltf['time'], unit='ms')
             length = len(df_ltf)
 
-            # Legfrissebb gyertyáktól hátrafelé szkennelünk az élő visszatesztekért
             for i in range(length - 5, 2, -1):
                 if df_ltf['high'].iloc[i] < df_ltf['low'].iloc[i+2]:
                     o_fvg_high = float(df_ltf['low'].iloc[i+2])
@@ -108,9 +109,11 @@ def analyze_pair(pair_symbol):
                         found_ifvg = True
                         chosen_tf = tf
                         break
-            if found_ifvg: break
+            if found_ifvg: 
+                break
 
-        if df_ltf.empty or not found_ifvg: return None
+        if df_ltf.empty or not found_ifvg: 
+            return None
 
         current_price = float(df_ltf['close'].iloc[-1])
         fvg_mid = (fvg_high + fvg_low) / 2.0
@@ -146,7 +149,7 @@ def analyze_pair(pair_symbol):
     except:
         return None
 
-# KÉPERNYŐ RAJZOLÓ MODUL (Tiszta Streamlit elemekkel)
+# KÉPERNYŐ RAJZOLÓ MODUL (Sima Streamlit elemekkel)
 def render_signal_block(display_name, res, unique_id):
     df_ltf = res["df_ltf"]
     length = len(df_ltf)
@@ -191,8 +194,8 @@ def render_signal_block(display_name, res, unique_id):
     st.plotly_chart(fig, use_container_width=True, key=f"chart_render_{unique_id}")
     
     st.write(f"🟢 **BESZÁLÓ ÁR (CE 50%):** ${res['entry_price']:.5f}")
-    st.write(f"🔴 **STOP LOSS ÁR (SL):</b> ${res['sl']:.5f}")
-    st.write(f"🔵 **TAKE PROFIT ÁR (TP):</b> ${res['tp']:.5f}")
+    st.write(f"🔴 **STOP LOSS ÁR (SL):** ${res['sl']:.5f}")
+    st.write(f"🔵 **TAKE PROFIT ÁR (TP):** ${res['tp']:.5f}")
     st.write(f"⚙️ **JAVASOLT TŐKEÁTTÉTEL:** {res['leverage']}x (Max 10x)")
     st.write(f"📊 **R:R ARÁNY / AKTUÁLIS ÁR:** 1:{res['rr']} | ${res['current_price']:.5f}")
     st.markdown("---")
