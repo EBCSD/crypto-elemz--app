@@ -25,29 +25,30 @@ def get_crypto_data(exch):
          .where(col('exchange') == exch)
          .select('name', 'close', 'volume', 'high', 'low', 'high|1h', 'low|1h', 'EMA20', 'ATR', 'RSI'))
     
-    # A legújabb API struktúra szerint a .data listából olvassuk ki a sorokat
-    result = q.get_scanner_data()
+    # Adatok lekérése a TradingView-ról
+    _, data = q.get_scanner_data()
     
-    # Biztonságos adatátalakítás DataFrame-mé
-    rows = []
-    if hasattr(result, 'data') and result.data:
-        for item in result.data:
-            row_dict = item.d if hasattr(item, 'd') else item
-            rows.append(row_dict)
-            
-    df = pd.DataFrame(rows)
+    # Biztonságos adatkezelés: közvetlenül a kapott DataFrame-et adjuk vissza
+    df = pd.DataFrame(data)
     return df
 
 try:
     df = get_crypto_data(exchange)
     
-    if not df.empty and 'name' in df.columns:
-        if market_type == "Futures":
-            df = df[df['name'].str.contains('PERP|USDT|USD!', case=False, na=False)]
+    if not df.empty:
+        # A TradingView oszlopnevek ellenőrzése és tisztítása
+        if 'ticker' in df.columns and 'name' not in df.columns:
+            df['name'] = df['ticker']
+            
+        if 'name' in df.columns:
+            if market_type == "Futures":
+                df = df[df['name'].str.contains('PERP|USDT|USD!', case=False, na=False)]
+            else:
+                df = df[~df['name'].str.contains('PERP', case=False, na=False)]
+            
+            pairs = df['name'].tolist()
         else:
-            df = df[~df['name'].str.contains('PERP', case=False, na=False)]
-        
-        pairs = df['name'].tolist()
+            pairs = []
     else:
         pairs = []
 
@@ -57,8 +58,10 @@ try:
         coin = df[df['name'] == selected_pair].iloc[0]
         
         price = float(coin['close'])
-        ltf_high, ltf_low = float(coin['high']), float(coin['low'])
-        htf_high, htf_low = float(coin['high|1h']), float(coin['low|1h'])
+        ltf_high = float(coin['high'])
+        ltf_low = float(coin['low'])
+        htf_high = float(coin['high|1h'])
+        htf_low = float(coin['low|1h'])
         atr = float(coin['ATR']) if pd.notna(coin['ATR']) else (price * 0.01)
         ema20 = float(coin['EMA20']) if pd.notna(coin['EMA20']) else price
         
@@ -102,6 +105,9 @@ try:
 except Exception as e:
     st.error(f"Hiba az adatok feldolgozásában: {e}")
 
+
+    
+    
     
 
 
