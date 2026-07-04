@@ -1,4 +1,4 @@
-# Kesz_Alkalmazas_Vegleges_Javitott
+# Kesz_Alkalmazas_Javitott_Tisztitott_Parok
 import streamlit as st
 import pandas as pd
 import ccxt
@@ -73,8 +73,11 @@ filtered_symbols = get_active_markets()
 
 def analyze_pair(pair_symbol):
     try:
-        # 1. HTF szintek lekérése
-        htf_ohlcv = exch.fetch_ohlcv(pair_symbol, timeframe='1h', limit=48)
+        # JAVÍTÁS: Kitisztítjuk a tőzsdei nevet (pl. "ACE/USDT:USDT" -> "ACE/USDT") a hibátlan lekérésért
+        clean_symbol = pair_symbol.split(':')[0] if ':' in pair_symbol else pair_symbol
+
+        # 1. HTF szintek lekérése a tiszta névvel
+        htf_ohlcv = exch.fetch_ohlcv(clean_symbol, timeframe='1h', limit=48)
         df_htf = pd.DataFrame(htf_ohlcv, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
         if df_htf.empty: return None
         
@@ -91,7 +94,7 @@ def analyze_pair(pair_symbol):
         fvg_type = None
         
         for tf in timeframes_to_check:
-            ltf_ohlcv = exch.fetch_ohlcv(pair_symbol, timeframe=tf, limit=40)
+            ltf_ohlcv = exch.fetch_ohlcv(clean_symbol, timeframe=tf, limit=40)
             df_ltf = pd.DataFrame(ltf_ohlcv, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
             df_ltf['time'] = pd.to_datetime(df_ltf['time'], unit='ms')
             
@@ -174,10 +177,11 @@ if run_scanner:
             df_ltf = res["df_ltf"]
             length = len(df_ltf)
             
-            # A) FEJLÉC KÁRTYA
+            # A) FEJLÉC KÁRTYA (A tiszta nevet írjuk ki a fejlécbe)
+            clean_display_name = pair.split(':')[0] if ':' in pair else pair
             st.markdown(f"""
                 <div class="signal-header">
-                    <h3 style='margin:0; font-size:16px;'>🔥 {pair} &nbsp;|&nbsp; Idősík: {res['chosen_tf']} &nbsp;|&nbsp; Irány: {res['trade_signal']}</h3>
+                    <h3 style='margin:0; font-size:16px;'>🔥 {clean_display_name} &nbsp;|&nbsp; Idősík: {res['chosen_tf']} &nbsp;|&nbsp; Irány: {res['trade_signal']}</h3>
                 </div>
             """, unsafe_allow_html=True)
             
@@ -216,8 +220,3 @@ if run_scanner:
 
             fig.update_layout(
                 template="plotly_dark", xaxis_rangeslider_visible=False, height=400,
-                paper_bgcolor='#131722', plot_bgcolor='#131722', margin=dict(l=10, r=55, t=10, b=10),
-                showlegend=False,
-                yaxis=dict(side="right", range=[y_min, y_max], gridcolor="#2a2e39", zeroline=False, tickfont=dict(color="#848e9c", size=10)),
-                xaxis=dict(gridcolor="#2a2e39", zeroline=False, tickfont=dict(color="#848e9c", size=10))
-            )
