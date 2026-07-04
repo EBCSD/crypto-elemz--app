@@ -40,7 +40,7 @@ try:
     if selected_pair and selected_pair != "Nincs adat":
         st.markdown(f"### 🔍 **{selected_pair.upper()}** Részletes ICT Elemzése...")
         
-        with st.spinner("Gyertyaadatok letöltése és elemzése..."):
+        with st.spinner("Gyertyaadatok letöltése..."):
             htf_ohlcv = exch.fetch_ohlcv(selected_pair, timeframe='1h', limit=48)
             df_htf = pd.DataFrame(htf_ohlcv, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
             
@@ -48,7 +48,6 @@ try:
             df_ltf = pd.DataFrame(ltf_ohlcv, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
             df_ltf['time'] = pd.to_datetime(df_ltf['time'], unit='ms')
 
-        # 1H/4H szintek meghatározása
         htf_high = df_htf['high'].max()
         htf_low = df_htf['low'].min()
         
@@ -57,7 +56,6 @@ try:
         df_ltf['ema20'] = df_ltf['close'].ewm(span=20, adjust=False).mean()
         current_ema20 = df_ltf['ema20'].iloc[-1]
 
-        # ATR (Average True Range) alapú intelligens játszótér számítás a Stop Loss-hoz
         df_ltf['tr'] = pd.concat([
             df_ltf['high'] - df_ltf['low'],
             (df_ltf['high'] - df_ltf['close'].shift()).abs(),
@@ -85,7 +83,6 @@ try:
                 fvg_mid = (fvg_high + fvg_low) / 2
                 break
 
-        # STRATÉGIA INTELLIGENS ATR JÁTSZÓTÉR STOP-LOSSAL ÉS MAX 10X ÁTTÉTELLEL
         if was_sell_liquidity_swept and fvg_high > 0 and current_price > fvg_high and current_price > current_ema20:
             trade_signal = "LONG / BUY"
             reason = "SHORT megállt, kialakult egy FVG, amit az árfolyam egy 15 perces zöld gyertyával felfelé INVERZELT! Ez igazolja, hogy a tőke akceptálta a támaszt."
@@ -102,7 +99,6 @@ try:
             take_profit_1 = entry_price - (abs(entry_price - stop_loss) * 4.0)
             take_profit_2 = min(htf_low, entry_price - (abs(entry_price - stop_loss) * 6.0))
 
-        # TRADINGVIEW GRAFIKON RAJZOLÁSA
         fig = go.Figure()
         
         fig.add_trace(go.Candlestick(
@@ -116,9 +112,9 @@ try:
         fig.add_trace(go.Scatter(x=df_ltf['time'], y=[htf_low]*len(df_ltf), name="HTF Low", line=dict(color='#00e676', width=1.5)))
 
         if fvg_high > 0 and fvg_low > 0:
-            fig.add_trace(go.Scatter(x=[df_ltf['time'].iloc, df_ltf['time'].iloc[-1]], y=[fvg_high, fvg_high], line=dict(color='#ffd600', width=2), showlegend=False))
-            fig.add_trace(go.Scatter(x=[df_ltf['time'].iloc, df_ltf['time'].iloc[-1]], y=[fvg_low, fvg_low], line=dict(color='#ffd600', width=2), showlegend=False))
-            fig.add_trace(go.Scatter(x=[df_ltf['time'].iloc, df_ltf['time'].iloc[-1]], y=[fvg_mid, fvg_mid], line=dict(color='#ffd600', width=1, dash='dash'), showlegend=False))
+            fig.add_trace(go.Scatter(x=[df_ltf['time'].iloc[0], df_ltf['time'].iloc[-1]], y=[fvg_high, fvg_high], line=dict(color='#ffd600', width=2), showlegend=False))
+            fig.add_trace(go.Scatter(x=[df_ltf['time'].iloc[0], df_ltf['time'].iloc[-1]], y=[fvg_low, fvg_low], line=dict(color='#ffd600', width=2), showlegend=False))
+            fig.add_trace(go.Scatter(x=[df_ltf['time'].iloc[0], df_ltf['time'].iloc[-1]], y=[fvg_mid, fvg_mid], line=dict(color='#ffd600', width=1, dash='dash'), showlegend=False))
             fig.add_hrect(y0=fvg_low, y1=fvg_high, fillcolor="rgba(255, 214, 0, 0.05)", line_width=0)
 
         if trade_signal != "VÁRAKOZÁS":
@@ -127,7 +123,6 @@ try:
             fig.add_trace(go.Scatter(x=df_ltf['time'], y=[take_profit_1]*len(df_ltf), name="TAKE PROFIT 1", line=dict(color='#00e676', width=2.5)))
             fig.add_trace(go.Scatter(x=df_ltf['time'], y=[take_profit_2]*len(df_ltf), name="TAKE PROFIT 2", line=dict(color='#00c853', width=2.5)))
 
-        # Automatikus skálázás a tiszta láthatóságért
         buffer = (df_ltf['high'].max() - df_ltf['low'].min()) * 0.15
         y_min = min(df_ltf['low'].min(), stop_loss if trade_signal != "VÁRAKOZÁS" else htf_low) - buffer
         y_max = max(df_ltf['high'].max(), stop_loss if trade_signal != "VÁRAKOZÁS" else htf_high) + buffer
@@ -154,7 +149,6 @@ try:
             max_loss_usd = total_balance * (risk_percent / 100)
             position_size_usd = max_loss_usd / sl_dist_pct
             
-            # TŐKEÁTTÉTEL MAXIMALIZÁLÁSA 10X-EN
             leverage = int(0.8 / sl_dist_pct)
             leverage = max(1, min(leverage, 10))
             
@@ -176,16 +170,7 @@ try:
         else:
             st.info(f"⏳ **RENDSZER STÁTUSZ:** {trade_signal}")
             st.write(f"**Jelenlegi helyzet:** {reason}")
+            st.write(f"Élő ár: **${current_price:,.4f}** | Felső Forduló Szint (Buy Liq): **${htf_high:,.4f}** | Alsó Forduló Szint (Sell Liq): **${htf_low:,.4f}**")
 
-        
-
-       
-        
-        
-
-
-            
-        
-                
-        
-        
+except Exception as e:
+    st.error(f"Hiba az adatok feldolgozásában: {e}")
