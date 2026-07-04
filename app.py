@@ -46,7 +46,7 @@ filtered_symbols = get_active_markets()
 # HAJSZÁLPONTOS INVERZ FVG MOTOR
 def analyze_pair(pair_symbol):
     try:
-        clean_symbol = pair_symbol.split(':') if ':' in pair_symbol else pair_symbol
+        clean_symbol = pair_symbol.split(':')[0] if ':' in pair_symbol else pair_symbol
         htf_1h = exch.fetch_ohlcv(clean_symbol, timeframe='1h', limit=48)
         htf_4h = exch.fetch_ohlcv(clean_symbol, timeframe='4h', limit=24)
         if not htf_1h or not htf_4h: return None
@@ -110,7 +110,7 @@ def analyze_pair(pair_symbol):
     except:
         return None
 
-# KÉPERNYŐ RAJZOLÓ MODUL (SZIGORÚAN FIX FELÜLETTEL)
+# KÉPERNYŐ RAJZOLÓ MODUL
 def render_signal_block(display_name, res, unique_id):
     df_ltf = res["df_ltf"]
     length = len(df_ltf)
@@ -138,23 +138,26 @@ def render_signal_block(display_name, res, unique_id):
     st.write(f"⚙️ **JAVASOLT TŐKEÁTTÉTEL:** {res['leverage']}x (Max 10x) | 📊 **R:R ARÁNY / AKTUÁLIS ÁR:** 1:{res['rr']} | ${res['current_price']:.5f}")
     st.markdown("---")
 
-# --- KÉZI KERESŐ (HA NINCS AUTOMATA MÓD) ---
+# --- JAVÍTOTT FŐ VEZÉRLŐ LOGIKA (NINCS TÖBBÉ LIMIT) ---
+if run_scanner:
+    st.subheader("🕵️‍♂️ ALGO ICT PRO Élő Automata Piacszkenner")
+    scan_placeholder = st.empty()
+    # JAVÍTÁS: Kiszedtük a [:40] korlátozást, így a TELJES piacot szkenneli (A-tól Z-ig az összes párt!)
+    for idx, pair in enumerate(filtered_symbols):
+        display_name = str(pair).split(':')[0] if ':' in str(pair) else str(pair)
+        scan_placeholder.text(f"Piac átfésülése ({idx+1}/{len(filtered_symbols)}): {display_name}")
+        res = analyze_pair(pair)
+        if res: 
+            render_signal_block(display_name, res, f"scan_mode_{idx}")
+        time.sleep(0.01)
+    scan_placeholder.empty()
+
 if not run_scanner:
     st.subheader("🎯 Kézi Elemzés és Egyedi Keresés")
     lumia_index = filtered_symbols.index("LUMIA/USDT") if "LUMIA/USDT" in filtered_symbols else 0
     selected_pair = st.selectbox("Válassz ki egy konkrét párt az azonnali elemzéshez:", filtered_symbols, index=lumia_index)
     manual_res = analyze_pair(selected_pair)
-    if manual_res: render_signal_block(selected_pair, manual_res, "manual_mode")
-    if not manual_res: st.info(f"A(z) {selected_pair} páron jelenleg nincs aktív iFVG szerkezet.")
-
-# --- AUTOMATA PIACSZKENNER MÓD (SZIGORÚAN LINEÁRIS CIKLUSSAL - ZÉRÓ HIBAVÉDELEM) ---
-if run_scanner:
-    st.subheader("🕵️‍♂️ ALGO ICT PRO Élő Automata Piacszkenner")
-    scan_placeholder = st.empty()
-    for idx, pair in enumerate(filtered_symbols):
-        display_name = str(pair).split(':')[0]
-        scan_placeholder.text(f"Piac átfésülése ({idx+1}/{len(filtered_symbols)}): {display_name}")
-        res = analyze_pair(pair)
-        if res: render_signal_block(display_name, res, f"scan_mode_{idx}")
-        time.sleep(0.01)
-    scan_placeholder.empty()
+    if manual_res: 
+        render_signal_block(selected_pair, manual_res, "manual_mode")
+    if not manual_res: 
+        st.info(f"A(z) {selected_pair} páron jelenleg nincs aktív iFVG szerkezet.")
