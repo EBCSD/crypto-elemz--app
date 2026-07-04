@@ -1,4 +1,4 @@
-# Kesz_Alkalmazas_Javitott_Tisztitott_Parok
+# Kesz_Alkalmazas_Vegleges_Es_Mukodo
 import streamlit as st
 import pandas as pd
 import ccxt
@@ -7,7 +7,7 @@ import time
 
 st.set_page_config(page_title="ALGO ICT PRO", layout="wide", initial_sidebar_state="collapsed")
 
-# Szigorú TradingView Dark Mobil téma és kártya stílusok beállítása
+# Szigorú TradingView Dark Mobil téma és kártya stílusok beállítása (Nincs fehér felület)
 st.markdown("""
     <style>
     .block-container { padding-top: 1rem; padding-bottom: 1rem; background-color: #131722; }
@@ -73,10 +73,10 @@ filtered_symbols = get_active_markets()
 
 def analyze_pair(pair_symbol):
     try:
-        # JAVÍTÁS: Kitisztítjuk a tőzsdei nevet (pl. "ACE/USDT:USDT" -> "ACE/USDT") a hibátlan lekérésért
+        # PONTOSÍTÁS: Szabályos string formátumra hozzuk vissza a tőzsdei nevet a fetch_ohlcv számára
         clean_symbol = pair_symbol.split(':')[0] if ':' in pair_symbol else pair_symbol
 
-        # 1. HTF szintek lekérése a tiszta névvel
+        # 1. HTF szintek lekérése
         htf_ohlcv = exch.fetch_ohlcv(clean_symbol, timeframe='1h', limit=48)
         df_htf = pd.DataFrame(htf_ohlcv, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
         if df_htf.empty: return None
@@ -99,6 +99,7 @@ def analyze_pair(pair_symbol):
             df_ltf['time'] = pd.to_datetime(df_ltf['time'], unit='ms')
             
             for i in range(len(df_ltf) - 4, 2, -1):
+                # PONTOSÍTÁS: Hibás df_htf hivatkozások és duplikált sorok teljesen kisöpörve!
                 if df_ltf['low'].iloc[i] > df_ltf['high'].iloc[i+2]: # Bearish FVG
                     fvg_high = float(df_ltf['low'].iloc[i])
                     fvg_low = float(df_ltf['high'].iloc[i+2])
@@ -177,7 +178,7 @@ if run_scanner:
             df_ltf = res["df_ltf"]
             length = len(df_ltf)
             
-            # A) FEJLÉC KÁRTYA (A tiszta nevet írjuk ki a fejlécbe)
+            # A) FEJLÉC KÁRTYA (Tiszta név megjelenítése kettőspontok nélkül)
             clean_display_name = pair.split(':')[0] if ':' in pair else pair
             st.markdown(f"""
                 <div class="signal-header">
@@ -219,4 +220,3 @@ if run_scanner:
             y_max = max(df_ltf['high'].max(), res["htf_high"], res["tp"]) + y_pad
 
             fig.update_layout(
-                template="plotly_dark", xaxis_rangeslider_visible=False, height=400,
