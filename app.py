@@ -1,149 +1,132 @@
 # Kesz_Alkalmazas
-import streamlit as st
-import pandas as pd
-import ccxt
-import plotly.graph_objects as go
-
-st.set_page_config(page_title="ICT Auto Trader Bot", layout="wide", initial_sidebar_state="collapsed")
-st.title("🏹 ICT Liquidity Sweep & IFVG Automata Elemző")
-
-st.sidebar.header("🎛️ Vezérlőpult")
-exchange_id = st.sidebar.selectbox("1. Válassz Tőzsdét:", ["bitget", "binance", "bybit", "okx"])
-market_type = st.sidebar.radio("2. Kereskedési mód:", ["Futures", "Spot", "Margin"])
-
-st.sidebar.markdown("---")
-st.sidebar.subheader("🔍 Piacszűrés Beállításai")
-scan_all_pairs = st.sidebar.checkbox("Minden pár automata szűrése", value=False)
-
-st.sidebar.markdown("---")
-st.sidebar.subheader("💰 Kockázatkezelés")
-total_balance = st.sidebar.number_input("Teljes Kereskedési Tőkéd ($):", min_value=10, value=1000)
-risk_percent = st.sidebar.slider("Megengedett kockázat (%):", min_value=0.5, max_value=100.0, value=5.0, step=0.5)
-
-@st.cache_resource
-def init_exchange(exch_id):
-    return getattr(ccxt, exch_id)({'enableRateLimit': True})
-
-def analyze_strategy(df_htf, df_ltf):
-    htf_high, htf_low = df_htf['high'].max(), df_htf['low'].min()
-    current_price, prev_price = df_ltf['close'].iloc[-1], df_ltf['close'].iloc[-2]
-    df_ltf['ema20'] = df_ltf['close'].ewm(span=20, adjust=False).mean()
-    current_ema20 = df_ltf['ema20'].iloc[-1]
-    df_ltf['tr'] = pd.concat([df_ltf['high'] - df_ltf['low'], (df_ltf['high'] - df_ltf['close'].shift()).abs(), (df_ltf['low'] - df_ltf['close'].shift()).abs()], axis=1).max(axis=1)
-    df_ltf['atr'] = df_ltf['tr'].rolling(window=14).mean()
-    current_atr = df_ltf['atr'].iloc[-1] if pd.notna(df_ltf['atr'].iloc[-1]) else (current_price * 0.005)
-    was_sell_swept = (df_ltf['low'].min() <= htf_low)
-    was_buy_swept = (df_ltf['high'].max() >= htf_high)
-    fvg_high, fvg_low, fvg_mid = 0.0, 0.0, 0.0
-    for i in range(len(df_ltf)-3, 1, -1):
-        if df_ltf['high'].iloc[i-2] < df_ltf['low'].iloc[i]:
-            fvg_high, fvg_low = df_ltf['low'].iloc[i], df_ltf['high'].iloc[i-2]
-            fvg_mid = (fvg_high + fvg_low) / 2
-            break
-        elif df_ltf['low'].iloc[i-2] > df_ltf['high'].iloc[i]:
-            fvg_high, fvg_low = df_ltf['low'].iloc[i-2], df_ltf['high'].iloc[i]
-            fvg_mid = (fvg_high + fvg_low) / 2
-            break
-    if was_sell_swept and fvg_high > 0 and current_price > fvg_high and current_price > current_ema20:
-        sl = htf_low - (1.5 * current_atr)
-        tp1 = current_price + (abs(current_price - sl) * 4.0)
-        tp2 = max(htf_high, current_price + (abs(current_price - sl) * 6.0))
-        return "LONG / BUY", current_price, sl, tp1, tp2, fvg_high, fvg_low, fvg_mid, htf_high, htf_low
-    elif was_buy_swept and fvg_low > 0 and current_price < fvg_low and current_price < current_ema20:
-        sl = htf_high + (1.5 * current_atr)
-        tp1 = current_price - (abs(current_price - sl) * 4.0)
-        tp2 = min(htf_low, current_price - (abs(current_price - sl) * 6.0))
-        return "SHORT / SELL", current_price, sl, tp1, tp2, fvg_high, fvg_low, fvg_mid, htf_high, htf_low
-    return "VÁRAKOZÁS", current_price, 0, 0, 0, fvg_high, fvg_low, fvg_mid, htf_high, htf_low
-
-try:
-    exch = init_exchange(exchange_id)
-    with st.spinner("Piacok szinkronizálása..."):
-        exch.load_markets()
-    all_symbols = list(exch.markets.keys())
-    if market_type == "Futures":
-        filtered_symbols = [s for s in all_symbols if exch.markets[s].get('linear') or ('USDT' in s and ':' in s)]
-    elif market_type == "Margin":
-        filtered_symbols = [s for s in all_symbols if exch.markets[s].get('margin')]
-    else:
-        filtered_symbols = [s for s in all_symbols if exch.markets[s].get('spot')]
-
-    if scan_all_pairs:
-        st.markdown("### ⚡ **Élő ICT Piacszűrő futása...**")
-        active_trades_found = 0
-        symbols_to_scan = filtered_symbols[:25]
-        progress_bar = st.progress(0)
-        for index, sym in enumerate(symbols_to_scan):
-            try:
-                htf = exch.fetch_ohlcv(sym, timeframe='1h', limit=48)
-                ltf = exch.fetch_ohlcv(sym, timeframe='15m', limit=40)
-                if len(htf) < 10 or len(ltf) < 10: continue
-                df_h = pd.DataFrame(htf, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
-                df_l = pd.DataFrame(ltf, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
-                signal, entry, sl, tp1, tp2, *rest = analyze_strategy(df_h, df_l)
-                if signal != "VÁRAKOZÁS":
-                    active_trades_found += 1
-                    sl_dist_pct = abs(entry - sl) / entry
-                    max_loss_usd = total_balance * (risk_percent / 100)
-                    pos_size = max_loss_usd / sl_dist_pct
-                    lev = max(1, min(int(0.8 / sl_dist_pct), 10))
-                    with st.expander(f"🔥 {sym} - JELZÉS: {signal}", expanded=True):
-                        c1, c2, c3, c4 = st.columns(4)
-                        c1.metric("Belépő", f"${entry:,.4f}")
-                        c2.metric("Stop Loss", f"${sl:,.4f}")
-                        c3.metric("Take Profit 1", f"${tp1:,.4f}")
-                        c4.metric("Take Profit 2", f"${tp2:,.4f}")
-                        st.info(f"📐 **Méretezés:** Áttétel: **{lev}x** | Pozíció méret: **${pos_size:,.2f}**")
-            except:
-                continue
-            progress_bar.progress((index + 1) / len(symbols_to_scan))
-        if active_trades_found == 0:
-            st.info("⏳ Inaktivitás. Egyetlen páron sincs aktív setup.")
-    else:
-        selected_pair = st.selectbox("2. Válassz ki egy kriptopárt az elemzéshez:", filtered_symbols if filtered_symbols else ["Nincs adat"])
-        if selected_pair and selected_pair != "Nincs adat":
-            st.markdown(f"### 🔍 **{selected_pair.upper()}** Részletes ICT Elemzése...")
-            with st.spinner("Adatok letöltése..."):
-                htf_ohlcv = exch.fetch_ohlcv(selected_pair, timeframe='1h', limit=48)
-                df_htf = pd.DataFrame(htf_ohlcv, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
-                ltf_ohlcv = exch.fetch_ohlcv(selected_pair, timeframe='15m', limit=40)
-                df_ltf = pd.DataFrame(ltf_ohlcv, columns=['time', 'open', 'high', 'low', 'close', 'volume'])
-                df_ltf['time'] = pd.to_datetime(df_ltf['time'], unit='ms')
-
-            signal, entry_price, stop_loss, take_profit_1, take_profit_2, fvg_high, fvg_low, fvg_mid, htf_high, htf_low = analyze_strategy(df_htf, df_ltf)
-
-            fig = go.Figure()
-            fig.add_trace(go.Candlestick(x=df_ltf['time'], open=df_ltf['open'], high=df_ltf['high'], low=df_ltf['low'], close=df_ltf['close'], name="15M", increasing_line_color='#089981', decreasing_line_color='#f23645', increasing_fillcolor='#089981', decreasing_fillcolor='#f23645'))
-            fig.add_trace(go.Scatter(x=df_ltf['time'], y=[htf_high]*len(df_ltf), name="HTF High", line=dict(color='#00e676', width=1.5)))
-            fig.add_trace(go.Scatter(x=df_ltf['time'], y=[htf_low]*len(df_ltf), name="HTF Low", line=dict(color='#00e676', width=1.5)))
-            if fvg_high > 0 and fvg_low > 0:
-                fig.add_trace(go.Scatter(x=[df_ltf['time'].iloc[0], df_ltf['time'].iloc[-1]], y=[fvg_high, fvg_high], line=dict(color='#ffd600', width=2), showlegend=False))
-                fig.add_trace(go.Scatter(x=[df_ltf['time'].iloc[0], df_ltf['time'].iloc[-1]], y=[fvg_low, fvg_low], line=dict(color='#ffd600', width=2), showlegend=False))
-                fig.add_trace(go.Scatter(x=[df_ltf['time'].iloc[0], df_ltf['time'].iloc[-1]], y=[fvg_mid, fvg_mid], line=dict(color='#ffd600', width=1, dash='dash'), showlegend=False))
-                fig.add_hrect(y0=fvg_low, y1=fvg_high, fillcolor="rgba(255, 214, 0, 0.05)", line_width=0)
-            if signal != "VÁRAKOZÁS":
-                fig.add_trace(go.Scatter(x=df_ltf['time'], y=[entry_price]*len(df_ltf), name="ENTRY", line=dict(color='#00b0ff', width=2.5)))
-                fig.add_trace(go.Scatter(x=df_ltf['time'], y=[stop_loss]*len(df_ltf), name="SL", line=dict(color='#ff1744', width=2.5)))
-                fig.add_trace(go.Scatter(x=df_ltf['time'], y=[take_profit_1]*len(df_ltf), name="TP1", line=dict(color='#00e676', width=2.5)))
-                fig.add_trace(go.Scatter(x=df_ltf['time'], y=[take_profit_2]*len(df_ltf), name="TP2", line=dict(color='#00c853', width=2.5)))
-            buffer = (df_ltf['high'].max() - df_ltf['low'].min()) * 0.15
-            y_min = min(df_ltf['low'].min(), stop_loss if signal != "VÁRAKOZÁS" else htf_low) - buffer
-            y_max = max(df_ltf['high'].max(), stop_loss if signal != "VÁRAKOZÁS" else htf_high) + buffer
-            fig.update_layout(template="plotly_dark", xaxis_rangeslider_visible=False, height=480, margin=dict(l=10, r=60, t=10, b=10), yaxis=dict(range=[y_min, y_max], fixedrange=False, side="right", gridcolor="#212529", tickfont=dict(size=12)), xaxis=dict(gridcolor="#212529"), showlegend=False)
-            st.plotly_chart(fig, use_container_width=True)
-            st.markdown("---")
-            st.subheader("🎯 Automatizált Kereskedési Javaslat")
-            if signal != "VÁRAKOZÁS":
-                st.success(f"🔥 **JELZÉS:** {signal}")
-                sl_dist_pct = abs(entry_price - stop_loss) / entry_price
-                max_loss_usd = total_balance * (risk_percent / 100)
-                position_size_usd = max_loss_usd / sl_dist_pct
-                leverage = max(1, min(int(0.8 / sl_dist_pct), 10))
-                margin = position_size_usd / leverage
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric("BELÉPŐ", f"${entry_price:,.6f}")
-                c2.metric("STOP LOSS", f"${stop_loss:,.6f}")
-                c3.metric("TAKE PROFIT 1", f"${take_profit_1:,.4f}")
-                c4.metric("TAKE PROFIT 2", f"${take_profit_2:,.4f}")
-                st.markdown("### 📐 Pozíció és Áttétel javaslat:")
-                cc1, cc2, cc3 = st.columns(3)
+import base64
+kod = """
+aW1wb3J0IHN0cmVhbWxpdCBhcyBzdAppbXBvcnQgcGFuZGFzIGFzIHBkCmltcG9ydCBjY3h0Cmlt
+cG9ydCBwbG90bHkuZ3JhcGhfb2JqZWN0cyBhcyBnbwpzdC5zZXRfcGFnZV9jb25maWcocGFnZV90
+aXRsZT0iSUNUIEF1dG8gVHJhZGVyIEJvdCIsIGxheW91dD0id2lkZSIsIGluaXRpYWxfc2lkZWJh
+cl9zdGF0ZT0iY29sbGFwc2VkIikKc3QudGl0bGUoIuKalCBTQ1QgTGlxdWlkaXR5IFN3ZWVwICYg
+SUZWRyBBdXRvbWF0YSBFbGVtem8iKQpzdC5zaWRlYmFyLmhlYWRlcigi8J+YmyBWZXplcmxvcHVs
+dCIpCmV4Y2hhbmdlX2lkID0gc3Quc2lkZWJhci5zZWxlY3Rib3goIjEuIFZhbGFzc3ogVG96c2Rl
+dDoiLCBbImJpdGdldCIsICJiaW5hbmNlIiwgImJ5Yml0IiwgIm9reCJdKQptYXJrZXRfdHlwZSA9
+IHN0LnNpZGViYXIucmFkaW8oIjIuIEtlcmVza2VkZXNpIG1vZDoiLCBbIkZ1dHVyZXMiLCAiU3Bv
+dCIsICJNYXJnaW4iXSkKc3Quc2lkZWJhci5tYXJrZG93bCgiLS0tIikKc3Quc2lkZWJhci5zdWJo
+ZWFkZXIoIuKShSBQaWFjc3p1cmVzIEJlYWxsaXRhc2FpIikKc2Nhbl9hbGxfcGFpcnMgPSBzdC5z
+aWRlYmFyLmNoZWNrYm94KCJNaW5kZW4gcGFhciBhdXRvbWF0YSBzenVyZXNhIiwgdmFsdWU9RmFs
+c2UpCnN0LnNpZGViYXIubWFya2Rvd2woIi0tLSIpCnN0LnNpZGViYXIuc3ViaGVhZGVyKCLwnpJD
+IEtvY2themF0a2V6ZWxlcyIpCnRvdGFsX2JhbGFuY2UgPSBzdC5zaWRlYmFyLm51bWJlcl9pbnB1
+dCgiVGVsamVzIEtlcmVza2VkZXNpIFRva2VkICgkKToiLCBtaW5fdmFsdWU9MTAsIHZhbHVlPTEw
+MDApCnJpc2tfcGVyY2VudCA9IHN0LnNpZGViYXIuc2xpZGVyKCJNZWdlbmdlZGV0dCBrb2NrYXph
+dCAoJSk6IiwgbWluX3ZhbHVlPTAuNSwgbWF4X3ZhbHVlPTEwMC4wLCB2YWx1ZT01LjAsIHN0ZXA9
+MC41KQpAc3QuY2FjaGVfcmVzb3VyY2UKZGVmIGluaXRfZXhjaGFuZ2UoZXhjaF9pZCk6CiByZXR1
+cm4gZ2V0YXR0cihjY3h0LCBleGNoX2lkKSh7J2VuYWJsZVJhdGVMaW1pdCc6IFRydWV9KQpkZWYg
+YW5hbHl6ZV9zdHJhdGVneShkZl9odGYsIGRmX2x0Zik6CiBodGZfaGlnaCwgaHRmX2xvdyA9IGRm
+X2h0ZlsnaGlnaCddLm1heCgpLCBkZl9odGZbJ2xvdyddLm1pbigpCiBjdXJyZW50X3ByaWNlLCBw
+cmV2X3ByaWNlID0gZGZfbHRmKydjbG9zZSddLmlsY2NbLTFdLCBkZl9sdGZbJ2Nsb3NlJ10uaWxj
+Y1stMl0KIGRmX2x0ZlsnZW1hMjAnXSA9IGRmX2x0ZlsnY2xvc2UnXS5ld20oc3Bhbj0yMCwgYWRq
+dXN0PUZhbHNlKS5tZWFuKCkKIGN1cnJlbnRfZW1hMjAgPSBkZl9sdGZbJ2VtYTIwJ10uaWxjY1st
+MV0KIGRmX2x0ZlsndHInXSA9IHBkLmNvbmNhdChbZGZfbHRmWydoaWdoJ10gLSBkZl9sdGZbJ2xv
+dyddLCAoZGZfbHRmWydoaWdoJ10gLSBkZl9sdGZbJ2Nsb3NlJ10uc2hpZnQoKSkuYWJzKCksIChk
+Zl9sdGZbJ2xvdyddIC0gZGZfbHRmKydjbG9zZSddLnNoaWZ0KCkpLmFicygpXSwgYXhpcz0xKS5t
+YXgoYXhpcz0xKQogZGZfbHRmWydhdHInXSA9IGRmX2x0ZlsndHInXS5yb2xsaW5nKHdpbmRvdz0x
+NCkubWVhbigpCiBjdXJyZW50X2F0ciA9IGRmX2x0ZlsnYXRyJ10uaWxjY1stMV0gaWYgcGQubm90
+bmEoZGZfbHRmWydhdHInXS5pbGNjWy0xXSkgZWxzZSAoY3VycmVudF9wcmljZSAqIDAuMDA1KQog
+d2FzX3NlbGxfc3dlcHQgPSAoZGZfbHRmWydsb3cnXS5taW4oKSA8PSBodGZfbG93KQogd2FzX2J1
+eV9zd2VwdCA9IChkZl9sdGZbJ2hpZ2gnXS5tYXgoKSA+PSBodGZfaGlnaCkKIGZ2Z19oaWdoLCBm
+dmdfbG93LCBmdmdfbWlkID0gMC4wLCAwLjAsIDAuMAogZm9yIGkgaW4gcmFuZ2UobGVuKGRmX2x0
+ZiktMywgMSwgLTEpOgogIGlmIGRmX2x0ZlsnaGlnaCddLmlsY2NbaS0yXSA8IGRmX2x0ZlsnbG93
+J10uaWxjY1tpXToKICAgZnZnX2hpZ2gsIGZ2Z19sb3cgPSBkZl9sdGZbJ2xvdyddLmlsY2NbaV0s
+IGRmX2x0ZlsnaGlnaCddLmlsY2NbaS0yXQogICBmdmdfbWlkID0gKGZ2Z19oaWdoICsgZnZnX2xv
+dykgLyAyCiAgIGJyZWFrCiAgZWxpZiBkZl9sdGZbJ2xvdyddLmlsY2NbaS0yXSA+IGRmX2x0Zlsn
+aGlnaCddLmlsY2NbaV06CiAgIGZ2Z19oaWdoLCBmdmdfbG93ID0gZGZfbHRmWydsb3cnXS5pbGNj
+W2ktMl0sIGRmX2x0ZlsnaGlnaCddLmlsY2NbaV0KICAgZnZnX21pZCA9IChmdmdfaGlnaCArIGZ2
+Z19sb3cpIC8gMgogICBicmVhawogaWYgd2FzX3NlbGxfc3dlcHQgYW5kIGZ2Z19oaWdoID4gMCBh
+bmQgY3VycmVudF9wcmljZSA+IGZ2Z19oaWdoIGFuZCBjdXJyZW50X3ByaWNlID4gY3VycmVudF9l
+bWEyMDoKICBzbCA9IGh0Zl9sb3cgLSAoMS41ICogY3VycmVudF9hdHIpCiAgdHAxID0gY3VycmVu
+dF9wcmljZSArIChhYnMoY3VycmVudF9wcmljZSAtIHNsKSAqIDQuMCkKICB0cDIgPSBtYXgoaHRm
+X2hpZ2gsIGN1cnJlbnRfcHJpY2UgKyAoYWJzKGN1cnJlbnRfcHJpY2UgLSBzbCkgKiA2LjApKQog
+IHJldHVybiAiTE9ORyAvIEJVWSIsIGN1cnJlbnRfcHJpY2UsIHNsLCB0cDEsIHRwMiwgZnZnX2hp
+Z2gsIGZ2Z19sb3csIGZ2Z19taWQsIGh0Zl9oaWdoLCBodGZfbG93CiBlbGlmIHdhc19idXlfc3dl
+cHQgYW5kIGZ2Z19sb3cgPiAwIGFuZCBjdXJyZW50X3ByaWNlIDwgZnZnX2xvdyBhbmQgY3VycmVu
+dF9wcmljZSA8IGN1cnJlbnRfZW1hMjA6CiAgc2wgPSBodGZfaGlnaCArICgxLjUgKiBjdXJyZW50
+X2F0cikKICB0cDEgPSBjdXJyZW50X3ByaWNlIC0gKGFicyhjdXJyZW50X3ByaWNlIC0gc2wpICog
+NC4wKQogIHRwMiA9IG1pbihodGZfbG93LCBjdXJyZW50X3ByaWNlIC0gKGFicyhjdXJyZW50X3By
+aWNlIC0gc2wpICogNi4wKSkKICByZXR1cm4gIlNIT1JUIC8gU0VMTCIsIGN1cnJlbnRfcHJpY2Us
+IHNsLCB0cDEsIHRwMiwgZnZnX2hpZ2gsIGZ2Z19sb3csIGZ2Z19taQsgaHRmX2hpZ2gsIGh0Zl9s
+b3cKIHJldHVybiAiVkFSQUtPWiFTIiwgY3VycmVudF9wcmljZSwgMCwgMCwgMCwgZnZnX2hpZ2gs
+IGZ2Z19sb3csIGZ2Z19taQsgaHRmX2hpZ2gsIGh0Zl9sb3cKdHJ5OgogZXhjaCA9IGluaXRfZXhj
+aGFuZ2UoZXhjaGFuZ2VfaWQpCiB3aXRoIHN0LnNwaW5uZXIoIlBpYWNvayBzemlua3Jvbml6YWxh
+c2EuLi4iKToKICBleGNoLmxvYWRfbWFya2V0cygpCiBhbGxfc3ltYm9scyA9IGxpc3QoZXhjaC5t
+YXJrZXRzLmtleXMoKSkKIGlmIG1hcmtldF90eXBlID09ICJGdXR1cmVzIjoKICBmaWx0ZXJlZF9z
+eW1ib2xzID0gW3MgZm9yIHMgaW4gYWxsX3N5bWJvbHMgaWYgZXhjaC5tYXJrZXRzW3NdLmdldCgn
+bGluZWFyJykgb3IgKCdVU0RUJyBpbiBzIGFuZCAnOicgaW4gcyldCiBlbGlmIG1hcmtldF90eXBl
+ID09ICJNYXJnaW4iOgogIGZpbHRlcmVkX3N5bWJvbHMgPSBbdHMgZm9yIHRzIGluIGFsbXN5bWJv
+bHMgaWYgZXhjaC5tYXJrZXRzW3RzXS5nZXQoJ21hcmdpbicpXQogZWxzZToKICBmaWx0ZXJlZF9z
+eW1ib2xzID0gW3MgZm9yIHMgaW4gYWxsX3N5bWJvbHMgaWYgZXhjaC5tYXJrZXRzW3NdLmdldCgn
+c3BvdCcpXQogaWYgc2Nhbl9hbGxfcGFpcnM6CiAgc3QubWFya2Rvd24oIiMjJiM4MDU3OyAqKuVs
+byBJQ1QgUGlhY3N6dXJvIGZ1dGFzYS4uLikqIikKICBhY3RpdmVfdHJhZGVzX2ZvdW5kID0gMAog
+IHN5bWJvbHNfdG9fc2NhbiA9IGZpbHRlcmVkX3N5bWJvbHNbOjI1XQogIHByb2dyZXNzX2JhciA9
+IHN0LnByb2dyZXNzKDApCiAgZm9yIGluZGV4LCBzeW0gaW4gZW51bWVyYXRlKHN5bWJvbHNfdG9f
+c2Nhbik6CiAgIHRyeToKICAgIGh0ZiA9IGV4Y2guZmV0Y2hfb2hsY3Yoc3ltLCB0aW1lZnJhbWU9
+JzFoJywgbGltaXQ9NDgpCiAgICBsdGYgPSBleGNoLmZldGNoX29obGN2KHN5bSwgdGltZWZyYW1l
+PScxNW0nLCBsaW1pdD00MCkKICAgIGlmIGxlbihodGYpIDwgMTAgb3IgbGVuKGx0ZikgPCAxMDog
+Y29udGludWUKICAgIGRmX2ggPSBwZC5EYXRhRnJhbWUoaHRmLCBjb2x1bW5zPVsndGltZScsICdv
+cGVuJywgJ2hpZ2gnLCAnbG93JywgJ2Nsb3NlJywgJ3ZvbHVtZSddKQogICAgZGZfbCA9IHBkLkRh
+dGFGcmFtZShsdGYsIGNvbHVtbnM9Wyd0aW1lJywgJ29wZW4nLCAnaGlnaCcsICdsb3cnLCAnY2xv
+c2UnLCAndm9sdW1lJ10pCiAgICBzaWduYWwsIGVudHJ5LCBzbCwgdHAxLCB0cDIsICpyZXN0ID0g
+YW5hbHl6ZV9zdHJhdGVneShkZl9oLCBkZl9sKQogICAgaWYgc2lnbmFsICE9ICJWQVJBS09aJVMi
+OgogICAgIGFjdGl2ZV90cmFkZXNfZm91bmQgKz0gMQogICAgIHNsX2Rpc3RfcGN0ID0gYWJzKGVu
+dHJ5IC0gc2wpIC8gZW50cnkKICAgICBtYXhfbG9zc191c2QgPSB0b3RhbF9iYWxhbmNlICogKHJp
+c2tfcGVyY2VudCAvIDEwMCkKICAgICBwb3Nfc2l6ZSA9IG1heF9sb3NzX3VzZCAvIHNsX2Rpc3Rf
+cGN0CiAgICAgbGV2ID0gbWF4KDEsIG1pbihpbnQoMC44IC8gc2xfZGlzdF9wY3QpLCAxMCkpCiAg
+ICAgd2l0aCBzdC5leHBhbmRlcihmIuKWhSB7c3ltfSAtIEpFTFpFUzoge3NpZ25hbH0iLCBleHBh
+bmRlZD1UcnVlKToKICAgICAgYzEsIGMyLCBjMywgYzQgPSBzdC5jb2x1bW5zKDQpCiAgICAgIGNp
+Lm1ldHJpYygiQmVsZXBvIiwgZiIke2VudHJ5OiwuNGZ9IikKICAgICAgYzIubWV0cmljKCJTdG9w
+IExvc3MiLCBmIiR7c2w6LC40Zn0iKQogICAgICBjMy5tZXRyaWMoIlRha2UgUHJvZml0IDEiLCBm
+IiR7dHAxOiwuNGZ9IikKICAgICAgYzQubWV0cmljKCJUYWtlIFByb2ZpdCAyIiwgZiIke3RwMjol
+LC40Zn0iKQogICAgICBzdC5pbmZvKGYi8J6SlyAqKk1lcmV0ZXphczoqKiBBdHRldGVsOiAqKnts
+ZXZ9eCoqIHwgUG96aWNpbyBtZXJldDogKioke3Bvc19zaXplOiwuMmZ9KioiKQogICBleGNlcHQ6
+CiAgICBjb250aW51ZQogICBwcm9ncmVzc19iYXIucHJvZ3Jlc3MoKGluZGV4ICsgMSkgLyBsZW4o
+c3ltYm9sc190b19zY2FuKSkKICBpZiBhY3RpdmVfdHJhZGVzX2ZvdW5kID09IDA6CiAgIHN0Lmlu
+Zm8oIuKStyBJbmFrdGl2aXRhcy4gRWd5ZXRsZW4gcGFyb24gc2luY3MgYWt0aXYgc2V0dXAuIikK
+IGVsc2U6CiAgc2VsZWN0ZWRfcGFpciA9IHN0LnNlbGVjdGJveCgiMi4gVmFsYXNzeiBraSBpbnRl
+bmV6ZW5kbyBrcmlwdG9wYXJ0OiIsIGZpbHRlcmVkX3N5bWJvbHMgaWYgZmlsdGVyZWRfc3ltYm9s
+cyBlbHNlIFsiTmluY3MgYWRhdCJdKQogIGlmIHNlbGVjdGVkX3BhaXIgYW5kIHNlbGVjdGVkX3Bh
+aXIgIT0gIk5pbmNzIGFkYXQiOgogICBzdC5tYXJrZG93bihmIiMjIyDwnpScICoqe3NlbGVjdGVk
+X3BhaXIudXBwZXIoKX0qKiBSZXN6bGV0ZXMgSUNUIEVsZW16ZXNlLi4uIikKICAgd2l0aCBzdC5z
+cGlubmVyKCJBZGF0b2sgbGV0b2x0ZXNlLi4uIik6CiAgICBodGZfb2hsY3YgPSBleGNoLmZldGNo
+X29obGN2KHNlbGVjdGVkX3BhaXIsIHRpbWVmcmFtZT0nMWgnLCBsaW1pdD00OCkKICAgIGRmX2h0
+ZiA9IHBkLkRhdGFGcmFtZShodGZfb2hsY3YsIGNvbHVtbnM9Wyd0aW1lJywgJ29wZW4nLCAnaGln
+aCcsICdsb3cnLCAnY2xvc2UnLCAndm9sdW1lJ10pCiAgICBsdGZfb2hsY3YgPSBleGNoLmZldGNo
+X29obGN2KHNlbGVjdGVkX3BhaXIsIHRpbWVmcmFtZT0nMTVtJywgbGltaXQ9NDApCiAgICBkZl9s
+dGYgPSBwZC5EYXRhRnJhbWUobHRmX29obGN2LCBjb2x1bW5zPVsndGltZScsICdvcGVuJywgJ2hp
+Z2gnLCAnbG93JywgJ2Nsb3NlJywgJ3ZvbHVtZSddKQogICAgZGZfbHRmKyd0aW1lJ10gPSBwZC50
+b19kYXRldGltZShkZl9sdGZbJ3RpbWUnXSwgdW5pdD0nbXMnKQogICBzaWduYWwsIGVudHJ5X3By
+aWNlLCBzdG9wX2xvc3MsIHRha2VfcHJvZml0XzEsIHRha2VfcHJvZml0XzIsIGZ2Z19oaWdoLCBm
+dmdfbG93LCBmdmdfbWlkLCBodGZfaGlnaCwgaHRmX2xvdyA9IGFuYWx5emVfc3RyYXRlZ3koZGZf
+aHRmLCBkZl9sdGYpCiAgIGZpZyA9IGdvLkZpZ3VyZSgpCiAgIGZpZy5hZGRfdHJhY2UoZ28uQ2Fu
+ZGxlc3RpY2soeD1kZl9sdGZbJ3RpbWUnXSwgb3Blbj1kZl9sdGZbJ29wZW4nXSwgaGlnaD1kZl9s
+dGZbJ2hpZ2gnXSwgbG93PWRmX2x0ZlsnbG93J10sIGNsb3NlPWRmX2x0ZlsnY2xvc2UnXSwgbmFt
+ZT0iMTVNIiwgaW5jcmVhc2luZ19saW5lX2NvbG9yPScjMDg5OTgxJywgZGVjcmVhc2luZ19saW5l
+X2NvbG9yPScjZjIzNjQ1JywgaW5jcmVhc2luZ19maWxsY29sb3I9JyMwODk5ODEnLCBkZWNyZWFz
+aW5nX2ZpbGxjb2xvcj0nI2YyMzY0NScpKQogICBmaWcuYWRkX3RyYWNlKGdvLlNjYXR0ZXIoeD1k
+Zl9sdGZbJ3RpbWUnXSwgeT1baHRmX2hpZ2hdKmxlbihkZl9sdGYpLCBuYW1lPSJIVEYgSGlnaCIs
+IGxpbmU9ZGljdChjb2xvcj0nIzAwZTY3NicsIHdpZHRoPTEuNSkpKQogICBmaWcuYWRkX3RyYWNl
+KGdvLlNjYXR0ZXIoeD1kZl9sdGZbJ3RpbWUnXSwgeT1baHRmX2xvdyEqbGVuKGRmX2x0ZiksIG5h
+bWU9IkhURiBMb3ciLCBsaW5lPWRpY3QoY29sb3I9JyMwMGU2NzYnLCB3aWR0aDoxLjUpKSkKICAgaWYg
+ZnZnX2hpZ2ggPiAwIGFuZCBmdmdfbG93ID4gMDoKICAgIGZpZy5hZGRfdHJhY2UoZ28LlNjYXR0
+ZXIoeD1bZGZfbHRmKyd0aW1lJ10uaWxvY1swXSwgZGZfbHRmKyd0aW1lJ10uaWxvY1stMV1dLCB5
+PVtmdmdfaGlnaCwgZnZnX2hpZ2hdLCBsaW5lZGljdChjb2xvcj0nI2ZmZDYwMCcsIHdpZHRoPTIp
+LCBzaG93bGVnZW5kPUZhbHNlKSkKICAgIGZpZy5hZGRfdHJhY2UoZ28LlNjYXR0ZXIoeD1bZGZf
+bHRmKyd0aW1lJ10uaWxvY1swXSwgZGZfbHRmKyd0aW1lJ10uaWxvY1stMV1dLCB5PVtmdmdfbG93
+LCBmdmdfbG93XSwgbGluZWRpY3QoY29sb3I9JyNmZmQ2MDAnLCB3aWR0aDoyKSwgc2hvd2xlZ2Vu
+ZD1GYWxzZSkpCiAgICBmaWcuYWRkX3RyYWNlKGdvLlNjYXR0ZXIoeD1bZGZfbHRmKyd0aW1lJ10u
+aWxvY1swXSwgZGZfbHRmKyd0aW1lJ10uaWxvY1stMV1dLCB5PVtmdmdfbWlkLCBmdmdfbWlkXSwg
+bGluZWRpY3QoY29sb3I9JyNmZmQ2MDAnLCB3aWR0aDoxLCBkYXNoPSdkYXNoJyksIHNob3dsZWdl
+bmQ9RmFsc2UpKQogICAgZmlnLmFkZF9ocmVjdCh5MD1mdmdfbG93LCB5MT1mdmdfaGlnaCwgZmls
+bGNvbG9yPSJyZ2JhKDI1NSwgMjE0LCAwLCAwLjA1KSIsIGxpbmVfd2lkdGg9MCkKICAgaWYgc2ln
+bmFsICE9ICJWQVJBS09aJVMiOgogICAgZmlnLmFkZF90cmFjZShnby5TY2F0dGVyKHg9ZGZfbHRm
+Kyd0aW1lJ10sIHk9W2VudHJ5X3ByaWNlXSpsZW4oZGZfbHRmKSwgbmFtZT0iRU5UUlkiLCBsaW5l
+PWRpY3QoY29sb3I9JyMwMGIwZmYnLCB3aWR0aDoyLjUpKSkKICAgIGZpZy5hZGRfdHJhY2UoZ28u
+U2NhdHRlcih4PWRmX2x0ZlsndGltZSddLCB5PVtzdG9wX2xvc3NdKmxlbihkZl9sdGYpLCBuYW1l
+PSJTTCIsIGxpbmU9ZGljdChjb2xvcj0nI2ZmMTc0NCcsIHdpZHRoPTIuNSkpKQogICAgZmlnLmFk
+ZF90cmFjZShnby5TY2F0dGVyKHg9ZGZfbHRmKyd0aW1lJ10sIHk9W3Rha2VfcHJvZml0XzFdKmxl
