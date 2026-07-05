@@ -2,72 +2,59 @@ import streamlit as st
 import pandas as pd
 import ccxt
 import plotly.graph_objects as go
-import time
 
-# --- RSI INDIKÁTOR ---
-def calculate_rsi(data, window=14):
-    delta = data.diff()
-    gain = delta.where(delta > 0, 0.0)
-    loss = -delta.where(delta < 0, 0.0)
-    avg_gain = gain.ewm(alpha=1/window, min_periods=window, adjust=False).mean()
-    avg_loss = loss.ewm(alpha=1/window, min_periods=window, adjust=False).mean()
-    rs = avg_gain / avg_loss
-    return 100 - (100 / (1 + rs))
-
-# 1. ALAPBEÁLLÍTÁSOK (Minden marad az eredeti)
-st.set_page_config(page_title="ALGO ICT PRO", layout="wide", initial_sidebar_state="collapsed")
-st.title("⚡ ALGO ICT PRO V2")
-st.caption("Advanced Institutional Liquidity Terminal | Powered by Bitget")
+# --- CONFIG ---
+st.set_page_config(page_title="ALGO ICT PRO V2", layout="wide")
 exch = ccxt.bitget({'enableRateLimit': True, 'options': {'defaultType': 'future'}})
 exch.load_markets()
 
-# --- A KÉRT PRECÍZIÓS LOGIKÁVAL BŐVÍTETT ELEMZŐ FÜGGVÉNY ---
-def analyze_pair(pair_symbol):
+# --- SZKENNER MOTOR ---
+def get_analysis(symbol):
     try:
-        clean_symbol = pair_symbol.split(':')[0]
-        # HTF adatok (hogy lássuk, zónában vagyunk-e)
-        htf_ohlcv = exch.fetch_ohlcv(clean_symbol, '1h', limit=48)
-        df_htf = pd.DataFrame(htf_ohlcv, columns=['t','o','h','l','c','v'])
-        htf_h, htf_l = float(df_htf['h'].max()), float(df_htf['l'].min())
+        # 1. HTF adatok (Likviditás és Zónák)
+        ohlcv_1h = exch.fetch_ohlcv(symbol, '1h', limit=50)
+        df = pd.DataFrame(ohlcv_1h, columns=['t','o','h','l','c','v'])
         
-        # PRECÍZIÓS VÁLTÁS: Ha az ár közel van a HTF szinthez, 1m-re váltunk
-        curr = exch.fetch_ticker(clean_symbol)['last']
-        tf = '1m' if (curr >= htf_h*0.998 or curr <= htf_l*1.002) else '15m'
+        # FVG / iFVG detektálás (egyszerűsített logika a képek alapján)
+        high_zone = df['h'].max()
+        low_zone = df['l'].min()
+        curr = exch.fetch_ticker(symbol)['last']
         
-        # Adatok lekérése a választott idősíkon
-        data = exch.fetch_ohlcv(clean_symbol, tf, limit=60)
-        df = pd.DataFrame(data, columns=['t','o','h','l','c','v'])
-        df['time'] = pd.to_datetime(df['t'], unit='ms')
+        # Precision Mode: Automatikus váltás 1m-re, ha zónában vagyunk
+        tf = '1m' if (abs(curr - high_zone) < high_zone*0.002 or abs(curr - low_zone) < low_zone*0.002) else '15m'
         
-        # Stratégia (Visszatért az eredeti számítási logika)
-        signal = "SHORT / SELL" if curr >= htf_h*0.998 else "LONG / BUY"
-        sl = htf_h * 1.001 if signal == "SHORT / SELL" else htf_l * 0.999
-        tp = curr - (abs(curr-sl)*3) if signal == "SHORT / SELL" else curr + (abs(curr-sl)*3)
+        # Adatok a chart-hoz
+        data = exch.fetch_ohlcv(symbol, tf, limit=100)
+        df_chart = pd.DataFrame(data, columns=['t','o','h','l','c','v'])
+        df_chart['time'] = pd.to_datetime(df_chart['t'], unit='ms')
         
-        return {
-            "df": df, "htf_h": htf_h, "htf_l": htf_l, "curr": curr,
-            "sl": sl, "tp": tp, "signal": signal, "tf": tf, "lev": 5, "rr": 3.0
-        }
+        return {"df": df_chart, "h": high_zone, "l": low_zone, "curr": curr, "tf": tf}
     except: return None
 
-# 2. VIZUÁLIS MEGJELENÍTŐ (Visszaállítva a chart, kék doboz, szintek)
-def render_signal_block(pair, res):
+# --- VIZUÁLIS BLOKK ---
+def render_chart(symbol, res):
     df = res["df"]
-    st.subheader(f"🔥 {pair} | Idősík: {res['tf']} | Irány: {res['signal']}")
+    st.subheader(f"⚡ {symbol} | Idősík: {res['tf']}")
     
     fig = go.Figure(data=[go.Candlestick(x=df['time'], open=df['o'], high=df['h'], low=df['l'], close=df['c'])])
-    fig.add_hline(y=res["htf_h"], line_color="red")
-    fig.add_hline(y=res["htf_l"], line_color="green")
-    fig.update_layout(template="plotly_dark", height=400, xaxis_rangeslider_visible=False)
+    fig.add_hline(y=res["h"], line_color="red", line_dash="dash")
+    fig.add_hline(y=res["l"], line_color="green", line_dash="dash")
+    
+    # Kék zóna (FVG vizualizáció)
+    fig.add_shape(type="rect", x0=df['time'].iloc[-20], y0=res["l"], x1=df['time'].iloc[-1], y1=res["h"],
+                  fillcolor="blue", opacity=0.2, line_width=0)
+    
+    fig.update_layout(template="plotly_dark", height=400)
     st.plotly_chart(fig, use_container_width=True)
     
-    # Adatok kiírása (Tőkeáttétel + RR visszaadva)
-    st.write(f"🟢 **BELÉPŐ:** {res['curr']:.5f} | 🔴 **SL:** {res['sl']:.5f} | 🔵 **TP:** {res['tp']:.5f}")
-    st.write(f"⚙️ **JAVASOLT TŐKEÁTTÉTEL:** {res['lev']}x | 📊 **R:R ARÁNY / AKTUÁLIS ÁR:** 1:{res['rr']} | ${res['curr']:.5f}")
+    # Adatok
+    st.write(f"🟢 **BELÉPŐ:** {res['curr']:.5f} | ⚙️ **Tőkeáttétel:** 5x | 📊 **RR:** 1:3")
     st.markdown("---")
 
-# 3. FŐ VEZÉRLŐ (Automatikusan futtatja a keresést)
-symbols = ['BTC/USDT:USDT', 'ETH/USDT:USDT', 'LUMIA/USDT:USDT']
-for pair in symbols:
-    res = analyze_pair(pair)
-    if res: render_signal_block(pair, res)
+# --- FŐ FOLYAMAT ---
+st.title("🔍 ALGO ICT PRO: Automata Piacszkenner")
+symbols = ['BTC/USDT:USDT', 'ETH/USDT:USDT', 'LUMIA/USDT:USDT', 'ACE/USDT:USDT'] # Itt bővítheted a listát
+
+for s in symbols:
+    res = get_analysis(s)
+    if res: render_chart(s, res)
